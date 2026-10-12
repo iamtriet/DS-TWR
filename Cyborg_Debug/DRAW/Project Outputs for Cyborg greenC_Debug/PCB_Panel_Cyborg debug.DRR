@@ -1,0 +1,19 @@
+----------------------------------------------------------------------------------------------------------------------------------
+NCDrill File Report For: PCB_Panel_Cyborg debug.PcbDoc   6/29/2026  12:03:27 PM
+----------------------------------------------------------------------------------------------------------------------------------
+
+Layer Pair : Top Layer to Bottom Layer
+ASCII RoundHoles File : PCB_Panel_Cyborg debug-RoundHoles.TXT
+ASCII SlotHoles File : PCB_Panel_Cyborg debug-SlotHoles.TXT
+
+Tool       Hole Size               Hole Tolerance               Hole Type       Hole Count   Plated         Tool Travel
+----------------------------------------------------------------------------------------------------------------------------------
+T1      12mil (0.3mm)                                             Round             432       PTH        66.13inch (1679.69mm)
+T2      20mil (0.5mm)                                             Round             12        PTH        10.17inch (258.40mm)
+T3      30mil (0.749mm)                                           Round             72        PTH        14.57inch (370.07mm)
+T4      32mil (0.8mm)                                             Slot              48        PTH        32.47inch (824.61mm)
+T5      30mil (0.749mm)                                           Round             24        NPTH       11.31inch (287.40mm)
+----------------------------------------------------------------------------------------------------------------------------------
+Totals                                                                              588
+
+Total Processing Time (hh:mm:ss) : 00:00:00

@@ -1,0 +1,15 @@
+Removed Pin From Net: NetName=UV2 Pin=J1-1
+Removed Pin From Net: NetName=UV1 Pin=J1-2
+Removed Pin From Net: NetName=GND Pin=J1-3
+Removed Pin From Net: NetName=+3V3 Pin=J1-4
+Change Component Footprint: Designator=J1 Old Footprint=jp 1x4 dt New Footprint=JP1X8 1.27mm
+Change Component Comment : Designator=R1 Old Comment=3.3 New Comment=10R
+Change Component Comment : Designator=R2 Old Comment=3.3 New Comment=10R
+Change Component Comment : Designator=R7 Old Comment=220 New Comment=100R
+Change Component Comment : Designator=R11 Old Comment=220 New Comment=100R
+Change Component Comment : Designator=J1 Old Comment=JP 1x4 New Comment=JP1x8
+Added Pin To Net: NetName=+3V3 Pin=J1-1
+Added Pin To Net: NetName=GND Pin=J1-2
+Added Pin To Net: NetName=UV1 Pin=J1-3
+Added Pin To Net: NetName=UV2 Pin=J1-4
+Change Class Name : Old Net Name=Custom_LED New Net Name=SCH_Cyborg_greenC_LED_UV

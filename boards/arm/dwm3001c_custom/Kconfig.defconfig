@@ -1,0 +1,14 @@
+# DWM3001C Custom Board configuration
+
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_DWM3001C_CUSTOM
+
+config BOARD
+	default "dwm3001c_custom"
+
+config BT_CTLR
+	default BT
+
+endif # BOARD_DWM3001C_CUSTOM

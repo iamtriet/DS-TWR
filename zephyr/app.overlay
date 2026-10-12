@@ -1,0 +1,89 @@
+/*
+ * DWM3001C HAT — Devicetree Overlay
+ *
+ * Khai báo bus SPI3 tới DW3110 UWB transceiver (nội bộ module DWM3001C)
+ * và các chân GPIO điều khiển: IRQ, Reset, Wakeup.
+ *
+ * Pin mapping (từ DWM3001C datasheet — đã xác nhận):
+ *   SPI3 SCK   = P0.03
+ *   SPI3 MOSI  = P0.08
+ *   SPI3 MISO  = P0.29  (P0.29/AIN5 — NOT P0.06!)
+ *   SPI3 CS    = P1.06
+ *   DW_IRQ     = P1.02 (Active High, input with pull-down)
+ *   DW_RST     = P0.25 (Active Low reset)
+ *   DW_WAKEUP  = P0.15 (Active High)
+ *
+ * LED0 = P0.06 (KHÔNG xung đột với SPI3 — MISO thực tế là P0.29)
+ */
+
+/* ----------------------------------------------------------------
+ * SPI3 — DW3110 UWB Transceiver
+ * ----------------------------------------------------------------
+ * Tần số SPI 2 MHz (conservative cho khởi tạo).
+ * Trong production firmware có thể tăng lên 16-20 MHz sau PLL lock.
+ */
+&spi3 {
+	compatible = "nordic,nrf-spim";
+	status = "okay";
+	sck-pin  = <3>;    /* P0.03 */
+	mosi-pin = <8>;    /* P0.08 */
+	miso-pin = <29>;   /* P0.29/AIN5 — per DWM3001C datasheet */
+	cs-gpios = <&gpio1 6 GPIO_ACTIVE_LOW>;  /* P1.06 */
+
+	dw3110: dw3110@0 {
+		compatible = "qorvo,dw3000";
+		reg = <0>;
+		spi-max-frequency = <2000000>;
+		label = "DW3110";
+	};
+};
+
+/* ----------------------------------------------------------------
+ * GPIO1 — cần bật (DW_IRQ trên P1.02, CS trên P1.06)
+ * ---------------------------------------------------------------- */
+&gpio1 {
+	status = "okay";
+};
+
+/* Native SchDoc, module table: pads 14/15 = P0.24/P1.04. External pull-ups. */
+&i2c0 {
+    compatible = "nordic,nrf-twim";
+    status = "okay";
+    sda-pin = <24>;
+    scl-pin = <36>;
+    clock-frequency = <100000>;
+};
+
+/* ----------------------------------------------------------------
+ * DW3110 Control Pins
+ * ----------------------------------------------------------------
+ * Khai báo dưới dạng gpio-keys để dễ truy cập qua DT API.
+ * Firmware sẽ override direction (output cho RST/WAKEUP,
+ * input cho IRQ) trong runtime code.
+ */
+/ {
+	dw3110_ctrl {
+		compatible = "gpio-keys";
+
+		dw_irq: dw_irq {
+			gpios = <&gpio1 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+			label = "DW3110 IRQ";
+		};
+
+		dw_rst: dw_rst {
+			gpios = <&gpio0 25 GPIO_ACTIVE_LOW>;
+			label = "DW3110 Reset";
+		};
+
+		dw_wakeup: dw_wakeup {
+			gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>;
+			label = "DW3110 Wakeup";
+		};
+	};
+
+	aliases {
+		dw-irq    = &dw_irq;
+		dw-rst    = &dw_rst;
+		dw-wakeup = &dw_wakeup;
+	};
+};

@@ -1,0 +1,19 @@
+{
+  "max_nodes": 30,
+  "target_rate_hz": 10.0,
+  "max_age": 1.5,
+  "node_timeout": 3.0,
+  "prediction_limit": 0.3,
+  "solver_budget_ms": 75.0,
+  "max_evaluations": 30,
+  "noise_m": 0.03,
+  "robust_scale_m": 0.08,
+  "max_rms_m": 0.15,
+  "max_uncertainty_m": 0.5,
+  "temporal_weight": 0.1,
+  "filtering": true,
+  "imu_motion_gating": true,
+  "gateway_slot_ms": 10,
+  "gateway_superframe_ms": 500,
+  "gateway_network_id": 1129923121
+}

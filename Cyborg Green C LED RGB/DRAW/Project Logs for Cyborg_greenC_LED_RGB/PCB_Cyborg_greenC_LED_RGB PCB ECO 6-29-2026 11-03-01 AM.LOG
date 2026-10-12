@@ -1,0 +1,2 @@
+Change Component Footprint: Designator=J1 Old Footprint=JP1X8 New Footprint=JP1X8 1.27mm
+Change Class Name : Old Net Name=control New Net Name=SCH_Cyborg_greenC_LED_RGB

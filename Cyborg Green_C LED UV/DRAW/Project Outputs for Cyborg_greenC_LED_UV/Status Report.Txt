@@ -1,0 +1,12 @@
+Output: NC Drill Files
+Type  : NC Drill
+From  : Project [Cyborg_greenC_LED_UV.PrjPcb]
+   Generated File[PCB_Cyborg_greenC_LED_UV.TXT]
+   Generated File[PCB_Cyborg_greenC_LED_UV.LDP]
+   Generated File[PCB_Cyborg_greenC_LED_UV.DRR]
+
+
+Files Generated   : 3
+Documents Printed : 0
+
+Finished Output Generation At 9:53:46 PM On 7/29/2026

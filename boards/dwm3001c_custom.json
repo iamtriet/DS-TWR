@@ -1,0 +1,37 @@
+{
+  "build": {
+    "cpu": "cortex-m4",
+    "f_cpu": "64000000L",
+    "mcu": "nrf52833",
+    "zephyr": {
+      "variant": "dwm3001c_custom"
+    }
+  },
+  "connectivity": [
+    "bluetooth"
+  ],
+  "debug": {
+    "default_tools": [
+      "stlink"
+    ],
+    "jlink_device": "nRF52833_xxAA",
+    "onboard_tools": [],
+    "svd_path": "nrf52833.svd"
+  },
+  "frameworks": [
+    "zephyr"
+  ],
+  "name": "DWM3001C Custom Board",
+  "upload": {
+    "maximum_ram_size": 131072,
+    "maximum_size": 200192,
+    "protocol": "stlink",
+    "protocols": [
+      "stlink",
+      "jlink",
+      "cmsis-dap"
+    ]
+  },
+  "url": "",
+  "vendor": "Custom"
+}

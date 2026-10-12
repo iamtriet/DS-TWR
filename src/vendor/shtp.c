@@ -1,0 +1,2 @@
+/* Build pinned vendor source with PlatformIO source discovery. */
+#include "../../vendor/sh2/shtp.c"

@@ -1,0 +1,22 @@
+----------------------------------------------------------------------------------------------------------------------------------
+NCDrill File Report For: Stencill_panel_Cyborg.PcbDoc   6/30/2026  11:46:36 AM
+----------------------------------------------------------------------------------------------------------------------------------
+
+Layer Pair : Top Layer to Bottom Layer
+ASCII RoundHoles File : Stencill_panel_Cyborg-RoundHoles.TXT
+ASCII SlotHoles File : Stencill_panel_Cyborg-SlotHoles.TXT
+
+Tool       Hole Size               Hole Tolerance               Hole Type       Hole Count   Plated         Tool Travel
+----------------------------------------------------------------------------------------------------------------------------------
+T1      12mil (0.3mm)                                             Round             1637      PTH        245.51inch (6235.97mm)
+T2      20mil (0.5mm)                                             Round             72        PTH        63.28inch (1607.40mm)
+T3      28mil (0.701mm)                                           Round             280       PTH        50.36inch (1279.20mm)
+T4      30mil (0.749mm)                                           Round             108       PTH        33.49inch (850.71mm)
+T5      32mil (0.8mm)                                             Slot              48        PTH        36.21inch (919.76mm)
+T6      40mil (1.021mm)                                           Round             24        PTH        10.13inch (257.37mm)
+T7      43mil (1.1mm)                                             Round             24        PTH        8.42inch (213.82mm)
+T8      30mil (0.749mm)                                           Round             24        NPTH       13.94inch (354.20mm)
+----------------------------------------------------------------------------------------------------------------------------------
+Totals                                                                              2217
+
+Total Processing Time (hh:mm:ss) : 00:00:01

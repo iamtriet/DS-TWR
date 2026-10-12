@@ -1,0 +1,3 @@
+Layer Pairs Export File for PCB: D:\altium\HOMEOS\6.Triet\30.Cyborg greenC_Ver20260602\Cyborg_Main\DRAW\Stencill_panel_Cyborg.PcbDoc
+LayersSetName=Top_Bot_Thru_Holes|DrillFile=stencill_panel_cyborg-roundholes.txt|DrillLayers=gtl,gbl
+LayersSetName=Top_Bot_Slot_Holes|DrillFile=stencill_panel_cyborg-slotholes.txt|DrillLayers=gtl,gbl

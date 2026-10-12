@@ -1,0 +1,15 @@
+Source PCB Design PCB_Panel_Cyborg debug.PcbDoc contains embedded board array. It is recomended to generate individual BOM for each embedded board PCB design.
+
+Output: NC Drill Files
+Type  : NC Drill
+From  : Project [Cyborg greenC_Debug.PrjPCB]
+   Generated File[PCB_Panel_Cyborg debug-RoundHoles.TXT]
+   Generated File[PCB_Panel_Cyborg debug-SlotHoles.TXT]
+   Generated File[PCB_Panel_Cyborg debug.LDP]
+   Generated File[PCB_Panel_Cyborg debug.DRR]
+
+
+Files Generated   : 4
+Documents Printed : 0
+
+Finished Output Generation At 12:03:27 PM On 6/29/2026

@@ -1,0 +1,12 @@
+Removed Pin From Net: NetName=EN Pin=JP1-3
+Removed Pin From Net: NetName=GPIO0 Pin=JP1-4
+Removed Pin From Net: NetName=VBUS Pin=JP1-5
+Removed Pin From Net: NetName=GND Pin=JP1-6
+Removed Pin From Net: NetName=DP Pin=R5-1
+Removed Pin From Net: NetName=DN Pin=R6-1
+Added Pin To Net: NetName=GPIO0 Pin=JP1-3
+Added Pin To Net: NetName=EN Pin=JP1-4
+Added Pin To Net: NetName=GND Pin=JP1-5
+Added Pin To Net: NetName=VBUS Pin=JP1-6
+Added Pin To Net: NetName=DN Pin=R5-1
+Added Pin To Net: NetName=DP Pin=R6-1

@@ -1,0 +1,12 @@
+Source PCB Design PCB_Panel_Cyborg greenC.PcbDoc contains embedded board array. It is recomended to generate individual BOM for each embedded board PCB design.
+
+Output: Generates pick and place files
+Type  : Pick Place
+From  : Variant [[No Variations]] of Project [Cyborg greenC_Main.PrjPcb]
+   Generated File[Pick Place for PCB_Panel_Cyborg greenC.txt]
+
+
+Files Generated   : 1
+Documents Printed : 0
+
+Finished Output Generation At 9:36:30 AM On 7/28/2026

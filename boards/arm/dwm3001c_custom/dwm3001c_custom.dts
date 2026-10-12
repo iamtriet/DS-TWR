@@ -1,0 +1,88 @@
+/* Reused custom board. Pins: HARDWARE.md and native SchDoc; stale comments removed. */
+/dts-v1/;
+#include <nordic/nrf52833_qiaa.dtsi>
+
+/ {
+	model = "DWM3001C Custom Board";
+	compatible = "custom,dwm3001c-custom";
+
+	chosen {
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,code-partition = &slot0_partition;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		led0: led_0 {
+			gpios = <&gpio0 6 GPIO_ACTIVE_LOW>;
+			label = "User LED 1";
+		};
+	};
+
+	aliases {
+		led0 = &led0;
+	};
+};
+
+&gpiote {
+	status = "okay";
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+/* UART0: native schematic / HARDWARE.md mapping; physical PCB unverified. */
+&uart0 {
+	compatible = "nordic,nrf-uarte";
+	status = "okay";
+	current-speed = <115200>;
+	tx-pin = <20>;   /* P0.20 — MCU transmits (native schematic) */
+	rx-pin = <21>;   /* P0.21 — MCU receives (native schematic) */
+	rx-pull-up;
+};
+
+/*
+ * Flash partitions — chuẩn bị cho MCUboot OTA (Pha 4).
+ * Layout tối ưu cho 512KB flash, swap mode.
+ */
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* MCUboot bootloader: 48KB */
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 0xC000>;
+		};
+
+		/* Application image slot 0: 200KB */
+		slot0_partition: partition@c000 {
+			label = "image-0";
+			reg = <0x0000C000 0x32000>;
+		};
+
+		/* Application image slot 1 (OTA staging): 200KB */
+		slot1_partition: partition@3e000 {
+			label = "image-1";
+			reg = <0x0003E000 0x32000>;
+		};
+
+		/* Scratch area for MCUboot swap: 40KB */
+		scratch_partition: partition@70000 {
+			label = "image-scratch";
+			reg = <0x00070000 0xA000>;
+		};
+
+		/* NVS storage for settings: 24KB */
+		storage_partition: partition@7a000 {
+			label = "storage";
+			reg = <0x0007A000 0x6000>;
+		};
+	};
+};

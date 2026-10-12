@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.13.1)
+include($ENV{ZEPHYR_BASE}/cmake/app/boilerplate.cmake NO_POLICY_SCOPE)
+project(pcb_validation)
+zephyr_include_directories(../include ../vendor/sh2 ../vendor/dw3000 ../vendor/dw3000/lib/qmath/include)
+zephyr_compile_definitions(CONFIG_DW3000_CHIP_DW3000=1)
+file(GLOB_RECURSE app_sources ../src/*.c)
+target_sources(app PRIVATE ${app_sources})
+target_link_libraries(app PRIVATE m)

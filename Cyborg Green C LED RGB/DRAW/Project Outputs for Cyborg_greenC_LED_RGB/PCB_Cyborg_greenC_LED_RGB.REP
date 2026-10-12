@@ -1,0 +1,210 @@
+*************************************************************
+FileName = PCB_Cyborg_greenC_LED_RGB.GBR
+AutoAperture = True
+*************************************************************
+Generating : Bottom Pad Master
+      File : PCB_Cyborg_greenC_LED_RGB.GPB
+
+    Adding Layer      : Bottom Layer
+
+    Adding Layer      : Multi-Layer
+
+
+Used DCodes :
+    D13
+    D20
+    D22
+*************************************************************
+
+*************************************************************
+Generating : Top Pad Master
+      File : PCB_Cyborg_greenC_LED_RGB.GPT
+
+    Adding Layer      : Top Layer
+
+    Adding Layer      : Multi-Layer
+
+
+Used DCodes :
+    D12
+    D13
+    D20
+*************************************************************
+
+*************************************************************
+Generating : Keep-Out Layer
+      File : PCB_Cyborg_greenC_LED_RGB.GKO
+
+    Adding Layer      : Keep-Out Layer
+
+
+Used DCodes :
+    D17
+*************************************************************
+
+*************************************************************
+Generating : Top Overlay
+      File : PCB_Cyborg_greenC_LED_RGB.GTO
+
+    Adding Layer      : Top Overlay
+
+
+Used DCodes :
+    D10
+    D11
+*************************************************************
+
+*************************************************************
+Generating : Bottom Paste
+      File : PCB_Cyborg_greenC_LED_RGB.GBP
+
+    Adding Layer      : Bottom Paste
+
+    Adding Layer      : Bottom Layer
+
+    Adding Layer      : Multi-Layer
+
+
+Used DCodes :
+    D13
+    D22
+*************************************************************
+
+*************************************************************
+Generating : Bottom Overlay
+      File : PCB_Cyborg_greenC_LED_RGB.GBO
+
+    Adding Layer      : Bottom Overlay
+
+
+Used DCodes :
+    D11
+    D26
+    D27
+*************************************************************
+
+*************************************************************
+Generating : Top Paste
+      File : PCB_Cyborg_greenC_LED_RGB.GTP
+
+    Adding Layer      : Top Paste
+
+    Adding Layer      : Top Layer
+
+    Adding Layer      : Multi-Layer
+
+
+Used DCodes :
+    D12
+    D13
+*************************************************************
+
+*************************************************************
+Generating : Bottom Layer
+      File : PCB_Cyborg_greenC_LED_RGB.GBL
+
+    Adding Layer      : Bottom Layer
+
+    Adding Layer      : Multi-Layer
+
+
+Used DCodes :
+    D13
+    D17
+    D18
+    D20
+    D21
+    D22
+    D23
+    D24
+*************************************************************
+
+*************************************************************
+Generating : Top Layer
+      File : PCB_Cyborg_greenC_LED_RGB.GTL
+
+    Adding Layer      : Top Layer
+
+    Adding Layer      : Multi-Layer
+
+
+Used DCodes :
+    D12
+    D13
+    D17
+    D18
+    D19
+    D20
+    D21
+*************************************************************
+
+*************************************************************
+Generating : Top Solder
+      File : PCB_Cyborg_greenC_LED_RGB.GTS
+
+    Adding Layer      : Top Solder
+
+    Adding Layer      : Top Layer
+
+    Adding Layer      : Multi-Layer
+
+
+Used DCodes :
+    D14
+    D15
+    D16
+*************************************************************
+
+*************************************************************
+Generating : Bottom Solder
+      File : PCB_Cyborg_greenC_LED_RGB.GBS
+
+    Adding Layer      : Bottom Solder
+
+    Adding Layer      : Bottom Layer
+
+    Adding Layer      : Multi-Layer
+
+
+Used DCodes :
+    D15
+    D16
+    D25
+*************************************************************
+
+*************************************************************
+Generating : Drill Drawing
+      File : PCB_Cyborg_greenC_LED_RGB.GD1
+
+    Adding Drill Pair : Top Layer-Bottom Layer
+
+    Adding Layer      : Drill Drawing
+
+
+Used DCodes :
+    D10
+    D28
+*************************************************************
+
+*************************************************************
+Generating : Drill Guide
+      File : PCB_Cyborg_greenC_LED_RGB.GG1
+
+    Adding Drill Pair : Top Layer-Bottom Layer
+
+    Adding Layer      : Drill Guide
+
+
+Used DCodes :
+    D10
+*************************************************************
+
+*************************************************************
+Generating : Profile
+      File : PCB_Cyborg_greenC_LED_RGB.GM
+
+
+Used DCodes :
+    D29
+*************************************************************
+

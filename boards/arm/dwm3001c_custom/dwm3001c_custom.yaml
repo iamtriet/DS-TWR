@@ -1,0 +1,13 @@
+identifier: dwm3001c_custom
+name: DWM3001C Custom Board
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+  - gnuarmemb
+supported:
+  - ble
+  - gpio
+  - pwm
+  - counter
+  - watchdog

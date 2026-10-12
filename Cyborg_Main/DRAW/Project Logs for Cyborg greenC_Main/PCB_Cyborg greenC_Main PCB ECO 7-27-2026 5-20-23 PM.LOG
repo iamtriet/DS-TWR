@@ -1,0 +1,43 @@
+Change Component Comment : Designator=C9 Old Comment=4.7uF/16V New Comment=4.7uF
+Change Component Comment : Designator=C6 Old Comment=22uF/10V New Comment=22uF 16V
+Change Component Comment : Designator=C7 Old Comment=22uF/10V New Comment=22uF 16V
+Change Component Comment : Designator=C2 Old Comment=22uF/16V New Comment=22uF 16V
+Change Component Comment : Designator=C10 Old Comment=100nF/16V New Comment=100nF
+Change Component Comment : Designator=C11 Old Comment=100nF/16V New Comment=100nF
+Change Component Comment : Designator=C15 Old Comment=100nF/16V New Comment=100nF
+Change Component Comment : Designator=C3 Old Comment=100nF/50V New Comment=100nF
+Change Component Comment : Designator=JP1 Old Comment=JP 1x4 2.54 New Comment=JP 1x4 1.27
+Change Component Comment : Designator=JP1 Old Comment=JP 1x8 2.54 New Comment=JP 1x8 1.27
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component C1 10uF
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component C4 100pF/50V
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component C5 10uF
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component C6 22uF 16V
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component C7 22uF 16V
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component C11 100nF
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component C12 1uF/16V
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component C14 22pF
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component C16 100nF
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component JP1 JP 1x8 1.27
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component JP1 JP 1x4 1.27
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component LED1 LED0805
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component LED3 LED0805
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component LED4 LED0805
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R1 1K
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R3 1K
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R4 100K
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R6 100K
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R10 22K
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R13 1K
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R14 NC
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R15 0R
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R16 10K
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R18 10K
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R19 4.7K
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R20 NC
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R21 NC
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component R22 NC
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component U1 TP4056
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component U4 SY8089AAAC
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component U6 FS8205A
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component U7 DWM3001C
+Added Member To Class: ClassName=Sch_Cyborg greenC_Main Member=Component U8 BNO085.1

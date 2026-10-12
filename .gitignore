@@ -1,0 +1,29 @@
+# PlatformIO
+.pio/
+
+# Build artifacts
+build/
+tmp/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Signing keys (sensitive — never commit)
+keys/
+*.pem
+
+# Board roster files (contain BLE addresses)
+boards_ota.json
+boards_ota_two.json
+boards_ota_powered.json
+
+# Data files
+*.csv
+*.log
+
+# VS Code
+.vscode/
+
+# Preserve Altium hardware design directories
+!Cyborg*/**

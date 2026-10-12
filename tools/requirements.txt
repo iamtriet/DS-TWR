@@ -1,0 +1,10 @@
+pyserial==3.5
+bleak==3.0.2
+cbor2==6.1.4
+imgtool==2.4.0
+intelhex==2.3.0
+cryptography==46.0.5
+numpy>=1.26,<3
+scipy>=1.16,<2
+threadpoolctl>=3.6,<4
+psutil>=7.1,<8

@@ -231,7 +231,7 @@ python tools/first_flash.py
 python tools/validate_artifacts.py
 ```
 
-> ⚠️ **Do not use plain `pio upload`** — it sends unsigned firmware and is incompatible with the MCUboot setup. Use the ST-Link procedure below or BLE OTA.
+> **Do not use plain `pio upload`** — it sends unsigned firmware and is incompatible with the MCUboot setup. Use the ST-Link procedure below or BLE OTA.
 
 **First-time programming via ST-Link:**
 
@@ -270,12 +270,12 @@ Update_All_Boards.cmd
 ```
 
 The batch updater:
-- ✅ Verifies signed images with local key
-- ✅ Skips boards already running the current version
-- ✅ Uploads with negotiated BLE packet size
-- ✅ Performs trial boot, verification, explicit confirmation
-- ✅ Runs two boards concurrently with connection reuse
-- ✅ Saves per-board reports under `build/batch-ota/`
+- Verifies signed images with local key
+- Skips boards already running the current version
+- Uploads with negotiated BLE packet size
+- Performs trial boot, verification, explicit confirmation
+- Runs two boards concurrently with connection reuse
+- Saves per-board reports under `build/batch-ota/`
 
 See [`docs/BATCH_OTA.md`](docs/BATCH_OTA.md) for details.
 
@@ -286,14 +286,14 @@ See [`docs/BATCH_OTA.md`](docs/BATCH_OTA.md) for details.
 Double-click **`Control_Center.cmd`** to launch the Python/Tk desktop application.
 
 **Features:**
-- 📡 **BLE Discovery** — scan and select nearby boards
-- 📦 **Signed OTA** — upload firmware with verification
-- 🔧 **ST-Link Provisioning** — program new boards via SWD
-- 📏 **Live Tracking** — real-time distance readings with trend graphs
-- 🎯 **Multi-tag View** — 1 anchor + up to 8 tags, 60-second trends
-- 🌐 **3D Positioning** — relative 3D tracking with projections
-- 🔬 **Sensor Diagnostics** — IMU reports, radio status, board info
-- 🎮 **Fleet Roster** — save/load board sets for batch operations
+- **BLE Discovery** — scan and select nearby boards
+- **Signed OTA** — upload firmware with verification
+- **ST-Link Provisioning** — program new boards via SWD
+- **Live Tracking** — real-time distance readings with trend graphs
+- **Multi-tag View** — 1 anchor + up to 8 tags, 60-second trends
+- **3D Positioning** — relative 3D tracking with projections
+- **Sensor Diagnostics** — IMU reports, radio status, board info
+- **Fleet Roster** — save/load board sets for batch operations
 
 No server or account required. Dependencies: `tools/requirements.txt` and Python with Tkinter.
 

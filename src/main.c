@@ -2,6 +2,7 @@
 #include "uwb_app.h"
 #include "uwb_network.h"
 #include "uwb_reference.h"
+#include "dstwr_tdma.h"
 void main(void)
 {
     int board_rc=board_init();
@@ -17,7 +18,7 @@ void main(void)
     bool blink_ok=board_rc==0;
 #endif
     for (;;) {
-        cli_service(); imu_service(); uwb_service(); network_service(); reference_service();
+        cli_service(); imu_service(); uwb_service(); network_service(); reference_service(); dstwr_service();
 #ifdef VALIDATION_LED_BLINK
         uint32_t now=k_uptime_get_32();
         if (blink_ok && (uint32_t)(now-led_changed)>=100) {
@@ -27,6 +28,6 @@ void main(void)
             if (led_rc) { blink_ok=false; out("LED heartbeat stopped rc=%d",led_rc); }
         }
 #endif
-        if(network_running()) k_yield(); else k_msleep(1);
+        if(network_running() || dstwr_get_state()->sync_state) k_yield(); else k_msleep(1);
     }
 }

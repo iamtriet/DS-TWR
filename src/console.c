@@ -1,6 +1,7 @@
 #include "validation.h"
 #include "uwb_network.h"
 #include "uwb_reference.h"
+#include "dstwr_tdma.h"
 #include <device.h>
 #include <drivers/uart.h>
 #include <stdarg.h>
@@ -98,6 +99,7 @@ static int dispatch(char *line)
         out("uwb cooperate (host-scheduled peer ranging; keeps anchor/tag LED role)");
         out("uwb capabilities | uwb output binary (U3D UART ranges; BP TDMA not qualified)");
         out("net configure ID COUNT SLOT_MS PERIOD_MS NET_HEX | net neighbors ID [ID ...] | net start experimental | net status/stop");
+        out("dstwr start ID (1-30 mobile, 0 sniffer) | dstwr status | dstwr stop");
         out("multitag add HEX | clear/start/stop/status/stats | uwb output text/csv");
         out("ota status/test/confirm/reboot (test requests a trial of the uploaded image)");
         return 0;
@@ -125,6 +127,7 @@ static int dispatch(char *line)
     if (!strcmp(args[0],"ref")) rc=reference_command(count-1,args+1);
     if (!strcmp(args[0],"multitag")) rc=multitag_command(count-1,args+1);
     if (!strcmp(args[0],"ota")) rc=ota_command(count-1,args+1);
+    if (!strcmp(args[0],"dstwr")) rc=dstwr_command(count-1,args+1);
     out("[%s] %s rc=%d",args[0],status_name(rc),rc);
     return rc;
 }

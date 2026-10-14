@@ -5,6 +5,7 @@
 #include "uwb_app.h"
 #include "uwb_network.h"
 #include "uwb_reference.h"
+#include "dstwr_tdma.h"
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -21,7 +22,7 @@ static int last_rc;
 static int last_stop_rc;
 static uint32_t transient_errors;
 bool uwb_is_anchor(void) { return anchor; }
-bool uwb_running(void) { return continuous || multitag_running() || network_running() || reference_running(); }
+bool uwb_running(void) { return continuous || multitag_running() || network_running() || reference_running() || (dstwr_get_state()->sync_state != 0); }
 bool uwb_configured(void) { return my_id && peer_id && my_id!=peer_id; }
 uint16_t uwb_local_id(void) { return my_id; }
 static uint32_t next_token(void)
@@ -35,6 +36,7 @@ void uwb_stop_all(void)
     continuous=false; responder_only=false; cooperative=false; multitag_stop();
     network_stop();
     reference_stop();
+    dstwr_stop();
     if (radio_stats()->ready) { int rc=radio_stop(); if (rc) out("UWB stop rc=%d",rc); }
 }
 int uwb_init(void) { uwb_stop_all(); return radio_init(); }

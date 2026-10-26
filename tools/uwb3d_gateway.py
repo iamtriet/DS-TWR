@@ -39,6 +39,22 @@ class GatewayFleet:
                 await session.command('net start experimental')
             finally:await session.close()
         self.emit('gateway','Experimental sparse BP active; timing is on the boards, UART gateway is node 1')
+    async def recover(self,node):
+        """Restore a verified board that rebooted/stopped; leave running radios alone."""
+        board=self.boards[node-1];session=self.session(board)
+        try:
+            await session.open();info=await session.command('info')
+            uid=next((m[1] for line in info if (m:=re.search(r'FICR ID=([0-9a-fA-F]{16})',line))),None)
+            if uid is None or uid.lower()!=self.identities.get(node,'').lower():raise RuntimeError('Recovery hardware UID mismatch')
+            status=await session.command('net status')
+            if any('running=1' in line for line in status):return False
+            if not any('running=0' in line for line in status):raise RuntimeError('Recovery: unknown radio state')
+            await session.command('uwb init')
+            await session.command(f'net configure {node} {len(self.boards)} {self.slot_ms} {self.period_ms} {self.network_id:X}')
+            await session.command('net start experimental')
+            self.emit('gateway',f'Recovered node {node:04X}: {board["name"]}')
+            return True
+        finally:await session.close()
     async def stop(self):
         remaining=[];errors=[]
         # Stop the clock first so followers cannot acquire another transmit slot.

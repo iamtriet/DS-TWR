@@ -12,6 +12,16 @@ typedef struct {
     int error;
 } radio_stats_t;
 bool radio_busy(void);
+#ifdef SWARM_RANGING
+void radio_port_fast(bool fast);
+int radio_swarm_arm(const uint8_t *data,size_t length,uint64_t raw);
+int radio_swarm_complete(uint64_t *actual);
+void radio_swarm_cancel(void);
+uint32_t radio_swarm_prepare_us(void);
+uint32_t radio_swarm_rx_us(void);
+void radio_swarm_setup(size_t length);
+int radio_swarm_rx(uint8_t *data,size_t capacity,size_t *length,uint64_t *timestamp,uint8_t *quality);
+#endif
 #ifdef REFERENCE_RANGING
 int radio_reference_phy(void);
 int radio_reference_acquire(void);

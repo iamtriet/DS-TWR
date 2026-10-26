@@ -2,6 +2,7 @@
 #include "radio.h"
 #include <deca_device_api.h>
 #include <string.h>
+#include <math.h>
 #include <sys/atomic.h>
 #include "uwb_app.h"
 #include "uwb3d_wire.h"
@@ -170,7 +171,9 @@ static int impl_rx(uint8_t *data,size_t capacity,size_t *length,uint64_t *timest
 void radio_status(void)
 {
     out("UWB ID=0x%08x ready=%u calibrated=%u error=%d IRQ edges=%u",stats.device_id,stats.ready,stats.calibrated,stats.error,radio_irq_count());
-    out("UWB CH5 PRF64 code9 preamble%u 6.8Mbps PAC8 SFD0 timeout%u PHR %s STS off PDoA off",phy.txPreambLength==DWT_PLEN_128?128:64,phy.sfdTO,phy.phrMode==DWT_PHRMODE_EXT?"extended":"standard");
+    if(phy.stsMode!=DWT_STS_MODE_OFF)
+        out("UWB reference CH5 PRF64 code9 preamble1024 850Kbps PAC32 SFD4Z timeout%u PHR standard STS1024 mode1 AES-GCM PDoA off",phy.sfdTO);
+    else out("UWB CH5 PRF64 code9 preamble%u 6.8Mbps PAC8 SFD0 timeout%u PHR %s STS off PDoA off",phy.txPreambLength==DWT_PLEN_128?128:64,phy.sfdTO,phy.phrMode==DWT_PHRMODE_EXT?"extended":"standard");
     out("UWB calibration=%s TXdelay=%u RXdelay=%u TXpower=0x%08x PGcount=%u PGdelay=0x%02x",cal_source,tx_ant,rx_ant,tx_power,pgcount,pgdelay);
     out("UWB TX=%u RX=%u TXerr=%u RXerr=%u CRC=%u timeout=%u last_len=%u last_event_ms=%u",stats.tx,stats.rx,stats.tx_errors,stats.rx_errors,stats.crc_errors,stats.timeouts,stats.last_length,stats.last_ms);
     out("UWB IRQ operation requires observed edges; RSSI/quality not reported; collisions cannot be distinguished from other RX errors");
@@ -202,6 +205,9 @@ int radio_network_phy(bool enable)
         dwt_forcetrxoff();phy.txPreambLength=enable?DWT_PLEN_128:DWT_PLEN_64;
         phy.phrMode=enable?DWT_PHRMODE_EXT:DWT_PHRMODE_STD;phy.sfdTO=enable?129:65;
         rc=checked(dwt_configure(&phy));if(!rc)rc=apply_cal();
+#ifdef SWARM_RANGING
+        if(enable)dwt_configciadiag(DW_CIA_DIAG_LOG_ALL);
+#endif
     }
     atomic_dec(&busy);return rc;
 }
@@ -231,9 +237,114 @@ int radio_reference_phy(void)
             rc=apply_cal();
             /* Upstream predicts unadjusted TX timestamps. Keep total measured
              * OTP antenna correction, placing it on RX as upstream does. */
-            dwt_settxantennadelay(0);dwt_setrxantennadelay((uint16_t)(tx_ant+rx_ant));
+            if(!rc) {
+                dwt_settxantennadelay(0);dwt_setrxantennadelay((uint16_t)(tx_ant+rx_ant));
+                rc=checked(0);
+            }
         }
     }
     atomic_dec(&busy);return rc;
+}
+#endif
+#ifdef SWARM_RANGING
+/* Nonblocking primitives: the sole application-thread owner drains RX and arms
+ * delayed TX without sleeping through the adjacent 1.3 ms slots. */
+static bool swarm_tx_pending;
+static uint64_t swarm_expected;
+static int64_t swarm_deadline;
+static uint32_t swarm_prepare_us,swarm_rx_us;
+uint32_t radio_swarm_rx_us(void) { return swarm_rx_us; }
+void radio_swarm_setup(size_t length)
+{
+    dwt_writetxfctrl(length+2,0,1);
+    dwt_setrxaftertxdelay(0);dwt_setrxtimeout(0);
+}
+uint32_t radio_swarm_prepare_us(void) { return swarm_prepare_us; }
+int radio_swarm_arm(const uint8_t *data,size_t length,uint64_t raw)
+{
+    if(swarm_tx_pending || enter())return -EBUSY;
+    uint32_t prepare_start=k_cycle_get_32();
+    int rc=0;
+    if(!stats.ready || !stats.calibrated || !length || length>RADIO_FRAME_MAX)rc=-EINVAL;
+    if(!rc) {
+        network_rx_active=false;dwt_forcetrxoff();
+        dwt_writesysstatuslo(DWT_INT_TXFRS_BIT_MASK|SYS_STATUS_ALL_RX_GOOD|SYS_STATUS_ALL_RX_ERR|SYS_STATUS_ALL_RX_TO);
+        rc=dwt_writetxdata(length,(uint8_t *)data,0);
+        /* Length / RX timing are fixed once at mode entry. Hardware HPDWARN
+         * and TXERR in dwt_starttx reject a missed deadline. Avoid redundant
+         * register traffic in this sub-millisecond critical path. */
+        if(!rc) {
+            dwt_setdelayedtrxtime((uint32_t)(raw>>8)&0xfffffffeU);
+            rc=dwt_starttx(DWT_START_TX_DELAYED|DWT_RESPONSE_EXPECTED);
+        }
+    }
+    swarm_prepare_us=k_cyc_to_us_floor32(k_cycle_get_32()-prepare_start);
+    rc=checked(rc);
+    if(rc) { ++stats.tx_errors;atomic_dec(&busy);return rc; }
+    swarm_expected=u3d_predicted_tx(raw,tx_ant);swarm_tx_pending=true;
+    swarm_deadline=k_uptime_get()+5;return 0;
+}
+int radio_swarm_complete(uint64_t *actual)
+{
+    if(!swarm_tx_pending)return -EINVAL;
+    uint32_t status=dwt_readsysstatuslo();
+    if(!(status&DWT_INT_TXFRS_BIT_MASK) && k_uptime_get()<swarm_deadline && !radio_port_error())return -EAGAIN;
+    int rc=-ETIMEDOUT;
+    if(status&DWT_INT_TXFRS_BIT_MASK) {
+        *actual=stamp(true);dwt_writesysstatuslo(DWT_INT_TXFRS_BIT_MASK);
+        rc=*actual==swarm_expected?0:-ERANGE;
+    }
+    swarm_tx_pending=false;atomic_dec(&busy);
+    if(!rc) { ++stats.tx;network_rx_active=true; }
+    else { ++stats.tx_errors;dwt_forcetrxoff();network_rx_active=false; }
+    return checked(rc);
+}
+void radio_swarm_cancel(void)
+{
+    if(swarm_tx_pending) { dwt_forcetrxoff();swarm_tx_pending=false;atomic_dec(&busy); }
+    network_rx_active=false;
+}
+int radio_swarm_rx(uint8_t *data,size_t capacity,size_t *length,uint64_t *timestamp,uint8_t *quality)
+{
+    if(swarm_tx_pending || enter())return -EAGAIN;
+    uint32_t rx_start=k_cycle_get_32();
+    int rc=-EAGAIN;if(quality)*quality=255;
+    if(!network_rx_active) {
+        dwt_forcetrxoff();dwt_writesysstatuslo(SYS_STATUS_ALL_RX_GOOD|SYS_STATUS_ALL_RX_ERR|SYS_STATUS_ALL_RX_TO);
+        rc=dwt_rxenable(DWT_START_RX_IMMEDIATE);
+        network_rx_active=rc==0;rc=rc?rc:-EAGAIN;
+    }
+    uint32_t status=dwt_readsysstatuslo();
+    if(status&DWT_INT_RXFCG_BIT_MASK) {
+        uint8_t ranging;uint16_t size=dwt_getframelength(&ranging);
+        if(size<2 || size-2>capacity)rc=-EMSGSIZE;
+        else {
+            *length=size-2;*timestamp=stamp(false);dwt_readrxdata(data,*length,0);
+            if(quality) {
+            dwt_rxdiag_t diagnostics;dwt_readdiagnostics(&diagnostics);
+            /* DW3110: RX=10log10(C*2^21/N^2)-A+6DGC,
+             * FP=10log10((F1^2+F2^2+F3^2)/N^2)-A+6DGC.
+             * F amplitudes have two fractional bits. In RX-FP, N, A and
+             * DGC cancel. Compute the ratio without four extra SPI reads
+             * or intermediate q8.8 saturation; absent diagnostics stay 255. */
+            float f1=diagnostics.ipatovF1*.25f,f2=diagnostics.ipatovF2*.25f,f3=diagnostics.ipatovF3*.25f;
+            float first=f1*f1+f2*f2+f3*f3;
+            if(diagnostics.ipatovAccumCount && diagnostics.ipatovPower && first>0.f) {
+                float db=10.f*log10f(((float)diagnostics.ipatovPower*2097152.f)/first);
+                if(isfinite(db)) { int gap=(int)(db+.5f);*quality=gap<0?0:gap>254?254:gap; }
+            }
+            }
+            ++stats.rx;rc=0;
+        }
+        dwt_writesysstatuslo(SYS_STATUS_ALL_RX_GOOD);
+        network_rx_active=dwt_rxenable(DWT_START_RX_IMMEDIATE)==DWT_SUCCESS;
+    } else if(status&(SYS_STATUS_ALL_RX_ERR|SYS_STATUS_ALL_RX_TO)) {
+        ++stats.rx_errors;dwt_writesysstatuslo(SYS_STATUS_ALL_RX_ERR|SYS_STATUS_ALL_RX_TO);network_rx_active=false;rc=-EBADMSG;
+    }
+    if(!network_rx_active) {
+        dwt_forcetrxoff();network_rx_active=dwt_rxenable(DWT_START_RX_IMMEDIATE)==DWT_SUCCESS;
+    }
+    if(!rc)swarm_rx_us=k_cyc_to_us_floor32(k_cycle_get_32()-rx_start);
+    atomic_dec(&busy);return checked(rc);
 }
 #endif

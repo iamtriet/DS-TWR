@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 from uwb3d_protocol import (Decoder,encode,DISCOVERY,DISCOVERY_BODY,RANGE,range_payload,
     decode_range,HEARTBEAT,STATUS,NETWORK,IMU,TIMESTAMPS,CONFIG_RESPONSE,Broadcast,BroadcastLedger)
-from uwb3d_core import Config,Engine,Matrix,Range,sparse_edges,align
+from uwb3d_core import Config,Engine,Matrix,Range,sparse_edges,align,six_neighbor_mask
 
 SCENARIOS=('Static','Random motion','Translation','Rotation','Expansion','Separating groups',
            'Packet loss','NLOS bias','Missing links','Disconnected','Join/leave','Rapid motion','Coplanar')
@@ -100,6 +100,8 @@ class Runtime:
         self.gateway=None;self.outgoing=deque(maxlen=64);self.assignments={};self.last_selection=0.
         self.uart_ready=None;self.reset_requested=False
         self.probe_index=0
+        from swarm_localization import AsymmetricDSTWRAssembler
+        self.swarm_ledger=AsymmetricDSTWRAssembler()
     def snapshot(self):
         with self.state_lock:return self.latest
     def submit(self,chunk,received=None):
@@ -110,6 +112,15 @@ class Runtime:
     async def start(self,source='simulation',**options):
         await self.stop()
         self.engine=Engine(self.config);self.decoder=Decoder();self.ledger=BroadcastLedger();self.offsets.clear();self.pending.clear()
+        from swarm_core import SwarmEngine
+        from swarm_localization import AsymmetricDSTWRAssembler
+        self.swarm_ledger=AsymmetricDSTWRAssembler(len(options.get('boards',[]))-(not bool(self.config.swarm_origin)) if source=='swarm' else 30)
+        if source=='swarm':
+            self.config.algorithm='swarm';self.config.dimensions=2;self.config.filtering=False
+            self.config.range_filtering=False;self.config.motion_profile=False
+            self.config.target_rate_hz=25.;self.config.max_age=.3;self.config.node_timeout=.6
+            self.engine=SwarmEngine(self.config)
+        else:self.config.algorithm='legacy'
         self.truth=None;self.truth_time=None;self.ranges.clear();self.error='';self.invalid=0;self.dropped=0;self.network={}
         self.source=source;self.started=time.monotonic();self.generation+=1
         self.outgoing.clear();self.assignments.clear();self.uart_ready=asyncio.Event()
@@ -120,6 +131,7 @@ class Runtime:
         elif source=='uart':producer=self._uart(**options)
         elif source=='gateway':producer=self._gateway(**options)
         elif source=='reference':producer=self._gateway(reference=True,**options)
+        elif source=='swarm':producer=self._gateway(swarm=True,**options)
         elif source=='legacy':producer=self._idle()
         else:raise ValueError('Unsupported source')
         self.tasks=[asyncio.create_task(producer),asyncio.create_task(self._estimate())]
@@ -172,22 +184,43 @@ class Runtime:
                 self.error=f'UART disconnected: {exc}; retrying'
                 if self.serial:await asyncio.to_thread(self.serial.close);self.serial=None
                 await asyncio.sleep(2)
-    async def _gateway(self,boards,port,reference=False):
+    async def _gateway(self,boards,port,reference=False,swarm=False):
         from uwb3d_gateway import GatewayFleet
         def emit(kind,value):
             if kind=='gateway':self.error=value
             if self.log:self.log.put(dict(type='gateway_event',elapsed=time.monotonic()-self.started,kind=kind,value=value))
-        if reference:
+        if swarm:
+            from swarm_gateway import SwarmFleet
+            self.gateway=SwarmFleet(boards,emit,self.config.swarm_origin)
+        elif reference:
             from reference_gateway import ReferenceFleet
             self.gateway=ReferenceFleet(boards,emit,self.config.reference_period_ms,self.config.reference_tag,self.config.reference_anchor_mask)
         else:self.gateway=GatewayFleet(boards,emit,self.config.gateway_slot_ms,self.config.gateway_superframe_ms,self.config.gateway_network_id)
         try:
             # Start UART first so boot/identity packets cannot be missed.
-            reader=asyncio.create_task(self._uart(port))
+            reader=asyncio.create_task(self._uart(port,1000000 if swarm else 115200))
             try:
                 await asyncio.wait_for(self.uart_ready.wait(),10)
                 await self.gateway.configure();self.error=('Reference TDMA DS-TWR active — STS/AES, RF/security unqualified' if reference else 'Experimental gateway active — radio throughput unqualified')
-                await reader
+                if swarm:
+                    if self.config.swarm_calibration:
+                        profile=json.loads(Path(self.config.swarm_calibration).read_text(encoding='utf-8-sig'))
+                        by_uid={uid.lower():node for node,uid in self.gateway.identities.items() if node}
+                        biases={}
+                        for row in profile['pairs']:
+                            a,b=(by_uid[uid.lower()] for uid in row['uids']);bias=float(row['bias_m'])
+                            if a==b or not math.isfinite(bias) or abs(bias)>1:raise ValueError('Invalid residual body calibration')
+                            key=tuple(sorted((a,b)))
+                            if key in biases:raise ValueError('Duplicate calibration pair')
+                            biases[key]=bias
+                        self.engine.bias=biases
+                    self.error=('Swarm: robust direct-range IEKF; ' if self.config.reference_nodes else 'Swarm: all-mobile cooperative range IEKF + BNO085 motion; ')+('residual calibration loaded' if self.engine.bias else 'body calibration absent')
+                    if self.config.swarm_origin:self.error=f'Swarm: stationary collector {self.config.swarm_origin:04X} origin; relative heading; '+('residual calibration loaded' if self.engine.bias else 'body calibration absent')
+                monitor=asyncio.create_task(self._recover_swarm_nodes() if swarm else self._recover_gateway_nodes()) if not reference else None
+                try:await reader
+                finally:
+                    if monitor:
+                        monitor.cancel();await asyncio.gather(monitor,return_exceptions=True)
             finally:
                 reader.cancel();await asyncio.gather(reader,return_exceptions=True)
         except asyncio.CancelledError:raise
@@ -195,6 +228,46 @@ class Runtime:
             self.error=str(exc)
             errors=await self.gateway.stop()
             if errors:self.error+='; stop unresolved: '+'; '.join(errors)
+    async def _recover_swarm_nodes(self):
+        attempted={};failures={};await asyncio.sleep(5)
+        while True:
+            if not self.uart_ready.is_set():
+                await asyncio.sleep(2);continue
+            state=self.snapshot() or {};now=time.monotonic()
+            last={n['id']:n['last'] for n in state.get('nodes',[])}
+            # Sniffer is RX-only and has no beacon of its own. Probe it only
+            # when the entire stream is absent, then check mobile nodes.
+            if not self.gateway.origin:last[0]=max(last.values(),default=self.started)
+            for node in list(self.gateway.identities):
+                if now-last.get(node,self.started)<5:
+                    failures.pop(node,None);continue
+                if now-attempted.get(node,0)<10:continue
+                attempted[node]=now;failures[node]=failures.get(node,0)+1
+                try:
+                    restored=await asyncio.wait_for(self.gateway.recover(node,restart_running=failures[node]>=2),20)
+                    self.error=f'Node {node:04X}: '+('radio restarted; awaiting UWB packets' if restored else 'radio reports running; will restart if stream stays absent')
+                except asyncio.CancelledError:raise
+                except Exception as exc:
+                    if self.log:self.log.put(dict(type='swarm_recovery_error',node=node,error=str(exc)))
+                break
+            await asyncio.sleep(2)
+
+    async def _recover_gateway_nodes(self):
+        attempted={};await asyncio.sleep(5)
+        while True:
+            state=self.snapshot();now=time.monotonic()
+            last={n['id']:n['last'] for n in state.get('nodes',[])} if state else {}
+            for node in range(1,len(self.gateway.boards)+1):
+                if now-last.get(node,self.started)<5 or now-attempted.get(node,0)<20:continue
+                attempted[node]=now
+                try:
+                    restored=await self.gateway.recover(node)
+                    if restored and node==1:self.assignments.clear()
+                    self.error=f'Node {node:04X}: radio restored; awaiting ranges' if restored else f'Node {node:04X}: radio running, waiting for UWB ranges'
+                except asyncio.CancelledError:raise
+                except Exception as exc:self.error=f'Node {node:04X} recovery: {exc}; retry in 20 s'
+                break # One bounded recovery at a time; other nodes keep ranging.
+            await asyncio.sleep(2)
     async def _replay(self,path,speed=1.,seek=0.):
         if speed<=0 or seek<0:raise ValueError('Replay speed/seek')
         self.replay_speed=speed;self.replay_paused=False
@@ -229,13 +302,32 @@ class Runtime:
                 try:
                     if packet.reset:
                         self.engine.matrix=Matrix(self.config);self.engine.reset();self.offsets.clear()
+                        if self.config.algorithm=='swarm':
+                            from swarm_localization import AsymmetricDSTWRAssembler
+                            self.swarm_ledger=AsymmetricDSTWRAssembler(self.swarm_ledger.count)
                     sent=packet.timestamp_us/1e6
                     if self.source=='replay':sent/=self.replay_speed
                     self.offsets.append(received-sent);offset=min(self.offsets)
-                    if packet.kind==DISCOVERY:
+                    if packet.kind==11:
+                        from swarm_core import Beacon
+                        if self.config.algorithm!='swarm':continue
+                        beacon=Beacon.unpack(packet.payload[5:],sent+offset)
+                        identity=self.gateway.identities.get(beacon.node) if self.gateway else None
+                        if identity is None:continue
+                        self.engine.registry.register(beacon.node,identity,received,firmware=self.gateway.versions.get(beacon.node,'unknown'))
+                        self.engine.registry.nodes[beacon.node].imu=beacon.motion
+                        for r in self.swarm_ledger.add(beacon):
+                            if r.a in self.engine.registry.nodes and r.b in self.engine.registry.nodes and self.engine.ingest(r):self.ranges.append(received)
+                        self.network.update(mode=4,superframe=beacon.seq,synchronized=True,master=beacon.master,term=beacon.term,sniffer_passive=not bool(self.config.swarm_origin),origin_node=self.config.swarm_origin)
+                    elif packet.kind==DISCOVERY:
                         if len(packet.payload)!=DISCOVERY_BODY.size:raise ValueError('discovery size')
                         id,uid,major,minor,patch,caps=DISCOVERY_BODY.unpack(packet.payload)
+                        previous=self.engine.registry.nodes.get(id)
+                        last=previous.last if previous else received
                         self.engine.registry.register(id,str(uid),received,firmware=f'{major}.{minor}.{patch}',capabilities=caps)
+                        # Sparse firmware repeats a cached identity roster; this
+                        # is not evidence of a fresh radio packet from that node.
+                        if self.source=='gateway':self.engine.registry.nodes[id].last=last
                     elif packet.kind==RANGE:
                         r=decode_range(packet.payload);effective=r.pop('effective_us')/1e6
                         if self.source=='replay':effective/=self.replay_speed
@@ -268,6 +360,7 @@ class Runtime:
                         previous=self.network.get('superframe')
                         if previous is not None and ((sf-previous)&0xffffffff)>=0x80000000:
                             self.engine.matrix=Matrix(self.config);self.engine.reset()
+                            self.assignments.clear()
                         self.network=dict(superframe=sf,synchronized=bool(sync),mode=mode,period_us=period)
                     elif packet.kind==CONFIG_RESPONSE:
                         if len(packet.payload)!=6:raise ValueError('assignment acknowledgement length')
@@ -278,13 +371,42 @@ class Runtime:
         self._process();now=time.monotonic();state=self.engine.estimate(now)
         state['source']=self.source;state['error']=self.error;state['network']=dict(self.network)
         if self.source=='gateway' and state['ids']==list(range(1,7)) and self.network.get('period_us',500000)<=150000:
-            # Six-node startup survey: rotate the one omitted edge of node 6.
-            # Otherwise a raised node outside the first tetrahedron can remain
-            # unobservable forever, preventing geometry-driven selection.
-            state['network']['neighbor_policy']='six-node rotating sparse survey'
+            # Retain the four-predecessor scaffold, adapt node 6's four peers,
+            # and periodically revisit the omitted link to preserve discovery.
+            state['network']['neighbor_policy']='six-node noise-aware sparse selection + periodic probe'
             if now-self.last_selection>.5:
-                self.last_selection=now;mask=31^(1<<self.probe_index);self.probe_index=(self.probe_index+1)%5
-                self.outgoing.append(f'net assign 6 {mask:X}')
+                self.last_selection=now
+                mask,scores=six_neighbor_mask(self.engine.matrix.history,self.engine.matrix.links,now,self.probe_index,
+                                              self.config.max_age,state['metrics'].get('inconsistent_links',()))
+                reference_peers=[node for node in self.config.reference_nodes if 1<=node<6]
+                if len(reference_peers)==4:
+                    # Current four-reference/two-tag profile: do not replace a
+                    # reference with the moving tag while ranging the far tag.
+                    mask=sum(1<<(node-1) for node in reference_peers)
+                elif len(reference_peers)==5 and 6 in state['positions'] and all(p in state['positions'] for p in reference_peers):
+                    target=np.array(state['positions'][6])[:2];candidates=[]
+                    for omitted in reference_peers:
+                        peers=[p for p in reference_peers if p!=omitted]
+                        vectors=target-np.array([state['positions'][p][:2] for p in peers])
+                        unit=vectors/np.maximum(np.linalg.norm(vectors,axis=1)[:,None],1e-6)
+                        information=unit.T@np.diag([max(.1,scores[p]) for p in peers])@unit
+                        candidates.append((float(np.linalg.eigvalsh(information)[0]),sum(1<<(p-1) for p in peers)))
+                    best,best_mask=max(candidates)
+                    current=self.assignments.get(6)
+                    current_score=next((score for score,m in candidates if m==current),0.)
+                    # Hold a healthy set: changing the constraints every three
+                    # seconds produces apparent movement on a stationary table.
+                    # Still replace failed links or substantially worse geometry.
+                    healthy=current is not None and all(
+                        (link:=self.engine.matrix.links.get((p,6))) is not None
+                        and now-link.effective<2*self.config.max_age
+                        for p in reference_peers if current&(1<<(p-1)))
+                    mask=current if healthy and current_score>=best*.35 else best_mask
+                self.probe_index+=1
+                state['network']['neighbor_scores']=scores
+                if self.assignments.get(6)!=mask:self.outgoing.append(f'net assign 6 {mask:X}')
+            if len(self.config.reference_nodes)==4:state['network']['neighbor_policy']='four surveyed references; independent tags 0003/0006'
+            elif len(self.config.reference_nodes)==5:state['network']['neighbor_policy']='surveyed core 0001–0005; geometry-aware node 0006'
         elif self.source=='gateway' and state['state']=='measured-supported' and now-self.last_selection>5:
             self.last_selection=now;ids=state['ids']
             quality={tuple(sorted((r['a'],r['b']))):

@@ -6133,8 +6133,13 @@ void ull_set_keyreg_128(dwchip_t *dw, const dwt_aes_key_t *key)
 static uint8_t ull_wait_aes_poll(dwchip_t *dw)
 {
     uint8_t tmp;
+    uint32_t retries = 1024U;
     do {
         tmp = dwt_read8bitoffsetreg(dw, AES_STS_ID, 0U);
+        if (--retries == 0U) {
+            validation_driver_fault();
+            return AES_STS_TRANS_ERR_BIT_MASK;
+        }
     } while ((tmp & (AES_STS_AES_DONE_BIT_MASK | AES_STS_TRANS_ERR_BIT_MASK)) == 0U);
 
     dwt_write8bitoffsetreg(dw, AES_STS_ID, 0U, tmp); // clear all bits which were set as a result of AES operation

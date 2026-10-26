@@ -1,4 +1,4 @@
-#ifndef REFERENCE_RANGING
+#if !defined(REFERENCE_RANGING) && !defined(SWARM_RANGING)
 /* Experimental sparse broadcast-pipelined DS-TWR. No physical anchors.
  * Coordinator 1 supplies a clock epoch. Delayed transmissions use DW time;
  * missed deadlines skip a slot, never transmit immediately into another slot.

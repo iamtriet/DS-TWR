@@ -25,7 +25,14 @@ static const struct bt_data advertising[]={
     BT_DATA_BYTES(BT_DATA_FLAGS,BT_LE_AD_GENERAL|BT_LE_AD_NO_BREDR),
     BT_DATA_BYTES(BT_DATA_UUID128_ALL,0x84,0xaa,0x60,0x74,0x52,0x8a,0x8b,0x86,0xd3,0x4c,0xb7,0x1d,0x1d,0xdc,0x53,0x8d)
 };
-bool ota_connected(void) { return atomic_get(&connected)!=0 && !control_enabled(); }
+bool ota_connected(void) {
+#ifdef SWARM_RANGING
+    /* Discovery/status connections must not stop the TDMA network. */
+    return atomic_get(&upload_locked)!=0;
+#else
+    return atomic_get(&connected)!=0 && !control_enabled();
+#endif
+}
 bool ota_upload_locked(void) { return atomic_get(&upload_locked)!=0; }
 static void advertise(struct k_work *work)
 {
@@ -37,7 +44,7 @@ static void on_connected(struct bt_conn *conn,uint8_t err)
 {
     ARG_UNUSED(conn);
     if (!err) { control_disconnect(); atomic_clear(&upload_locked); atomic_set(&connected,1); }
-    out("[OTA] BLE connection err=%u; radio pauses while connected",err);
+    out("[OTA] BLE connection err=%u",err);
 }
 static void on_disconnected(struct bt_conn *conn,uint8_t reason)
 {
@@ -56,6 +63,12 @@ static int upload_guard(uint32_t offset,uint32_t size,void *arg)
     ARG_UNUSED(arg);
     /* Lock control out before any flash write; the main loop stops ranging. */
     atomic_set(&upload_locked,1); control_disconnect();
+#ifdef SWARM_RANGING
+    /* Yield the management workqueue until the application cancels TX/RX.
+     * Never write flash while a radio operation still owns the SPI buffers. */
+    for (unsigned wait=0;wait<100 && (uwb_running() || radio_busy());wait++)
+        k_msleep(1);
+#endif
     if (uwb_running()) return MGMT_ERR_EUNKNOWN;
     if (radio_busy()) { out("[OTA] upload deferred: radio operation finishing; retry"); return MGMT_ERR_EUNKNOWN; }
     static uint32_t last_bucket=UINT32_MAX;

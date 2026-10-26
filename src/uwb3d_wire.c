@@ -11,15 +11,17 @@ static uint32_t crc32(const uint8_t *p,size_t n)
 }
 size_t u3d_encode(uint8_t type,uint32_t seq,uint64_t stamp,const uint8_t *payload,size_t n,uint8_t *out,size_t cap)
 {
-    uint8_t raw[148];
-    if(!out || !type || type>10 || n>128 || (n && !payload) || cap<n+23) return 0;
+    uint8_t raw[300];
+    if(!out || !type || type>11 || n>280 || (n && !payload) || cap<n+24+n/254) return 0;
     raw[0]=1;raw[1]=type;put(raw+2,n,2);put(raw+4,seq,4);put(raw+8,stamp,8);
     if(n) memcpy(raw+16,payload,n);
     put(raw+16+n,crc32(raw,16+n),4);
     /* Leading delimiter recovers from interspersed legacy ASCII diagnostics. */
     out[0]=0;size_t mark=1,pos=2;uint8_t code=1;
     for(size_t i=0;i<n+20;++i) {
-        if(raw[i]) { out[pos++]=raw[i];++code; }
+        if(raw[i]) { out[pos++]=raw[i];++code;
+            if(code==255) { out[mark]=code;mark=pos++;code=1; }
+        }
         else { out[mark]=code;mark=pos++;code=1; }
     }
     out[mark]=code;out[pos++]=0;return pos;

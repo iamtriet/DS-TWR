@@ -2,6 +2,7 @@
  * driver owner. GPIO ISR only increments a counter; it never accesses SPI. */
 #include "validation.h"
 #include "radio.h"
+#include "uwb_swarm.h"
 #include <drivers/spi.h>
 #include <drivers/gpio.h>
 #include <sys/atomic.h>
@@ -11,18 +12,22 @@
 
 static const struct device *spi,*gpio0,*gpio1;
 static struct spi_cs_control cs;
-static struct spi_config config;
+static struct spi_config config,fast_config;
+static bool fast_mode;
 static struct gpio_callback irq_cb;
 static bool cb_added;
 static atomic_t irq_count;
 static int fault;
 static uint8_t tx[1032],rx[1032];
+#ifdef SWARM_RANGING
+static struct k_poll_signal spi_done;
+#endif
 static int latch(int rc) { if (rc && !fault) fault=rc; return rc; }
 int radio_port_error(void) { return fault; }
 void validation_driver_fault(void) { latch(-ETIMEDOUT); }
 uint32_t radio_irq_count(void) { return (uint32_t)atomic_get(&irq_count); }
 static void irq_event(const struct device *dev,struct gpio_callback *cb,uint32_t pins)
-{ ARG_UNUSED(dev); ARG_UNUSED(cb); ARG_UNUSED(pins); atomic_inc(&irq_count); }
+{ ARG_UNUSED(dev); ARG_UNUSED(cb); ARG_UNUSED(pins); atomic_inc(&irq_count);swarm_wake(); }
 static int transfer(uint16_t h,const uint8_t *header,uint16_t length,const uint8_t *body,uint8_t *data,bool crc,uint8_t check)
 {
     if (data) memset(data,0,length);
@@ -34,14 +39,34 @@ static int transfer(uint16_t h,const uint8_t *header,uint16_t length,const uint8
     if (crc) tx[h+length]=check;
     struct spi_buf tb={.buf=tx,.len=total}, rb={.buf=rx,.len=total};
     struct spi_buf_set ts={.buffers=&tb,.count=1},rs={.buffers=&rb,.count=1};
-    int rc=spi_transceive(spi,&config,&ts,data?&rs:NULL);
+    int rc;
+#ifdef SWARM_RANGING
+    if(fast_mode) {
+        /* Keep short register transfers in this thread. The SPIM ISR still
+         * completes EasyDMA; BLE/timer interrupts remain enabled. Avoid a
+         * scheduler round-trip for every tiny DW register transaction. */
+        k_poll_signal_reset(&spi_done);
+        rc=spi_transceive_async(spi,&fast_config,&ts,data?&rs:NULL,&spi_done);
+        uint32_t started=k_cycle_get_32();
+        while(!rc) {
+            unsigned int signaled;int result;
+            k_poll_signal_check(&spi_done,&signaled,&result);
+            if(signaled) { rc=result;break; }
+            if(k_cyc_to_us_floor32(k_cycle_get_32()-started)>2000U) { rc=-ETIMEDOUT;break; }
+        }
+    } else
+#endif
+        rc=spi_transceive(spi,&config,&ts,data?&rs:NULL);
     if (!rc && data) memcpy(data,rx+h,length);
     return latch(rc);
 }
 static int32_t read_spi(uint16_t h,uint8_t *header,uint16_t n,uint8_t *data) { return transfer(h,header,n,NULL,data,false,0); }
 static int32_t write_spi(uint16_t h,const uint8_t *header,uint16_t n,const uint8_t *data) { return transfer(h,header,n,data,NULL,false,0); }
 static int32_t write_crc(uint16_t h,const uint8_t *header,uint16_t n,const uint8_t *data,uint8_t crc) { return transfer(h,header,n,data,NULL,true,crc); }
-static void speed(void) { config.frequency=2000000; }
+static void speed(void) { fast_mode=false; }
+/* Zephyr caches configuration by pointer identity: mutating frequency on the
+ * existing object does not reconfigure SPIM. Use a distinct immutable config. */
+void radio_port_fast(bool fast) { fast_mode=fast; }
 static void wakeup(void)
 {
     if (fault) return;
@@ -61,10 +86,14 @@ void deca_usleep(unsigned long us) { k_busy_wait(us); }
 int radio_port_init(void)
 {
     fault=0;
+#ifdef SWARM_RANGING
+    k_poll_signal_init(&spi_done);
+#endif
     spi=DEVICE_DT_GET(DT_NODELABEL(spi3)); gpio0=DEVICE_DT_GET(DT_NODELABEL(gpio0)); gpio1=DEVICE_DT_GET(DT_NODELABEL(gpio1));
     if (!device_is_ready(spi) || !device_is_ready(gpio0) || !device_is_ready(gpio1)) return latch(-ENODEV);
     cs.gpio_dev=gpio1; cs.gpio_pin=6; cs.gpio_dt_flags=GPIO_ACTIVE_LOW; cs.delay=0;
     config=(struct spi_config){.frequency=2000000,.operation=SPI_OP_MODE_MASTER|SPI_WORD_SET(8)|SPI_TRANSFER_MSB,.slave=0,.cs=&cs};
+    fast_config=config;fast_config.frequency=8000000;fast_mode=false;
     int rc=gpio_pin_configure(gpio0,15,GPIO_OUTPUT_LOW);
     if (!rc) rc=gpio_pin_configure(gpio1,2,GPIO_INPUT|GPIO_PULL_DOWN);
     if (!rc && !cb_added) {

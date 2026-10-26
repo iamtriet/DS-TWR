@@ -58,8 +58,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("action", choices=["keygen", "sign"])
     p.add_argument("--key", type=Path, default=ROOT / "keys/development.pem")
-    p.add_argument("--env", choices=["validation", "validation_b", "reference"], default="validation")
+    p.add_argument("--env", choices=["validation", "validation_b", "reference", "swarm"], default="validation")
     p.add_argument("--output-dir", type=Path, default=ROOT / "build/images")
+    p.add_argument("--build-dir", type=Path, default=ROOT / ".pio/build")
     a = p.parse_args()
     if a.action == "keygen":
         if a.key.exists():
@@ -69,7 +70,7 @@ def main():
         print("Local development key created. Keep it private; use the same key for MCUboot and both images.")
         return
     from intelhex import IntelHex
-    image = IntelHex(str(ROOT / f".pio/build/{a.env}/firmware.hex"))
+    image = IntelHex(str(a.build_dir / a.env / "firmware.hex"))
     # Zephyr leaves the reserved header absent in HEX (minaddr is vector start).
     if image.minaddr() not in (BASE, BASE + HEADER) or image.maxaddr() >= BASE + SLOT - TRAILER:
         p.error("Application HEX address outside primary payload region")
@@ -81,7 +82,7 @@ def main():
     if len(versions) != 1:
         p.error("Expected exactly one firmware version manifest in current HEX")
     version = versions.pop().decode()
-    expected = {"validation":"1.0.0","validation_b":"1.0.18","reference":"1.1.0"}[a.env]
+    expected = {"validation":"1.0.0","validation_b":"1.0.18","reference":"1.1.0","swarm":"1.2.7"}[a.env]
     if version != expected:
         p.error(f"Stale or wrong build: expected {expected}, got {version}")
     out = a.output_dir
@@ -102,4 +103,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

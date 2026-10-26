@@ -227,15 +227,21 @@ async def batch(a):
         temp.replace(path)
     # Passing discovered devices avoids an implicit scan at every connection,
     # which is particularly problematic with concurrent Windows connections.
-    print("Discovering enrolled boards once before connecting...", flush=True)
+    print("Discovering enrolled boards before connecting...", flush=True)
     devices = {d.address.upper(): d for d in await BleakScanner.discover(timeout=8)}
+    missing = {b["address"].upper() for b in boards} - devices.keys()
+    if missing:
+        # A single Windows BLE scan can miss powered boards. Retry discovery
+        # before opening any connections so OTA transfers are not interrupted.
+        print(f"Repeating discovery for {len(missing)} missing enrolled board(s)...", flush=True)
+        devices.update({d.address.upper(): d for d in await BleakScanner.discover(timeout=8)})
     async def worker(index, b):
         print(f"[{index}/{len(boards)}] {b['name']} {b['address']}", flush=True)
         row = {**b, "status": "FAILED", "attempts": []}
         board_started = time.monotonic()
         device = devices.get(b["address"].upper())
         if device is None:
-            row["attempts"].append({"error": "Not found in BLE scan; power board and retry"})
+            row["attempts"].append({"error": "Not found in two BLE scans; check board connection and retry"})
         else:
             for attempt in range(1, a.attempts+1):
                 attempt_started = time.monotonic()

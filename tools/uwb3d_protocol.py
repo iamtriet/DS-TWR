@@ -55,7 +55,7 @@ class Packet:
 
 
 def encode(kind,sequence,timestamp_us,payload=b''):
-    if kind not in range(1,11) or len(payload)>MAX_PAYLOAD: raise ValueError('Packet bounds')
+    if kind not in range(1,12) or len(payload)>MAX_PAYLOAD: raise ValueError('Packet bounds')
     raw=HEADER.pack(VERSION,kind,len(payload),sequence&0xffffffff,timestamp_us)+payload
     return cobs_encode(raw+struct.pack('<I',zlib.crc32(raw)))+b'\0'
 
@@ -78,9 +78,9 @@ class Decoder:
                 if len(data)<HEADER.size+4:raise ValueError('short')
                 version,kind,size,seq,stamp=HEADER.unpack_from(data)
                 if version!=VERSION:raise ValueError('version')
-                if kind not in range(1,11) or size>MAX_PAYLOAD or len(data)!=HEADER.size+size+4:raise ValueError('length')
+                if kind not in range(1,12) or size>MAX_PAYLOAD or len(data)!=HEADER.size+size+4:raise ValueError('length')
                 if zlib.crc32(data[:-4])!=struct.unpack_from('<I',data,len(data)-4)[0]:raise ValueError('crc')
-                reset=kind==DISCOVERY and seq==0 and self.last_stamp is not None and stamp+1000000<self.last_stamp
+                reset=((kind==DISCOVERY and seq==0) or (kind==11 and seq<1024)) and self.last_stamp is not None and stamp+1000000<self.last_stamp
                 if reset:self.last=None;self.stats['resets']+=1
                 if self.last is not None:
                     delta=(seq-self.last)&0xffffffff

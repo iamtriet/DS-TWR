@@ -4,6 +4,7 @@ import json
 import math
 import time
 from dataclasses import asdict
+from copy import deepcopy
 from pathlib import Path
 from collections import deque
 import tkinter as tk
@@ -12,14 +13,15 @@ import numpy as np
 from cooperative_view import CooperativeView
 from uwb3d_runtime import Runtime,SCENARIOS,export_csv
 from uwb3d_core import Config
+from position_gate import PositionGate
 
-COLORS={'measured-supported':'#3cdbc1','estimated':'#79b5ff','predicted':'#ffbf5f','stale':'#85919d','unavailable':'#ef7777'}
+COLORS={'reacquired':'#79b5ff','outlier-rejected':'#ffa650','measured-supported':'#3cdbc1','estimated':'#79b5ff','predicted':'#ffbf5f','stale':'#85919d','unavailable':'#ef7777'}
 
 
 class Scene(tk.Canvas):
     def __init__(self,parent):
         super().__init__(parent,bg='#102331',highlightthickness=0,height=330)
-        self.yaw=.5;self.pitch=.5;self.scale=45.;self.pan=np.zeros(2);self.drag=None;self.selected=None;self.follow=False
+        self.yaw=.5;self.pitch=.5;self.scale=45.;self.pan=np.zeros(2);self.drag=None;self.selected=None;self.selected_nodes=set();self.follow=False
         self.projection='3D';self.nodes={};self.links={};self.trails={};self.state=None;self.last_time=None
         self.options=dict(labels=True,trails=True,links=False,grid=True,axes=True,uncertainty=False)
         self.grid_items=[self.create_line(0,0,0,0,fill='#213b4d') for _ in range(22)]
@@ -30,10 +32,14 @@ class Scene(tk.Canvas):
         self.bind('<Configure>',lambda e:self.render(self.state))
     def press(self,e):
         self.drag=(e.x,e.y)
-        hit=self.find_closest(e.x,e.y)
-        if hit:
-            for tag in self.gettags(hit[0]):
-                if tag.startswith('node:'):self.selected=int(tag.split(':')[1])
+        positions={int(n):np.asarray(p) for n,p in (self.state or {}).get('positions',{}).items()}
+        center=positions.get(self.selected,np.zeros(3)) if self.follow else np.zeros(3)
+        candidates=[(math.hypot(self.project(p,center)[0]-e.x,self.project(p,center)[1]-e.y),n) for n,p in positions.items()]
+        if candidates and min(candidates)[0]<=16:
+            self.selected=min(candidates)[1]
+            if self.selected in self.selected_nodes:self.selected_nodes.remove(self.selected)
+            else:self.selected_nodes.add(self.selected)
+            self.render(self.state)
     def move(self,e):
         if self.drag:
             dx,dy=e.x-self.drag[0],e.y-self.drag[1]
@@ -78,11 +84,16 @@ class Scene(tk.Canvas):
         for id,p in positions.items():
             if id not in self.nodes:
                 self.nodes[id]=(self.create_oval(0,0,1,1,tags=(f'node:{id}',)),self.create_text(0,0,anchor='w',fill='#e1eff8',tags=(f'node:{id}',)),self.create_line(0,0,0,0,fill='#3a7c85'),self.create_oval(0,0,1,1,outline='#7795a5',dash=(2,3)))
-            dot,label,trail,uncertainty=self.nodes[id];x,y=self.project(p,center);color=COLORS.get(state['state'],'white')
-            self.coords(dot,x-6,y-6,x+6,y+6);self.itemconfigure(dot,fill=color,outline='white' if id==self.selected else color,width=3,state='normal')
-            self.coords(label,x+10,y);self.itemconfigure(label,text=f'{id:04X}',state='normal' if self.options['labels'] else 'hidden')
+            node_state=state.get('node_states',{}).get(id,state['state'])
+            dot,label,trail,uncertainty=self.nodes[id];x,y=self.project(p,center);color=COLORS.get(node_state,'white')
+            self.coords(dot,x-6,y-6,x+6,y+6);self.itemconfigure(dot,fill=color,outline='white' if id in self.selected_nodes else color,width=3,state='normal')
+            name='SNIFFER (0,0)' if id==state.get('metrics',{}).get('origin_node') else f'{id:04X}'
+            if node_state=='outlier-rejected':name+=' · HELD'
+            elif id in state.get('stationary_held',[]):name+=' · QUIET LOCK'
+            self.coords(label,x+10,y);self.itemconfigure(label,text=name,state='normal' if self.options['labels'] else 'hidden')
             history=self.trails.setdefault(id,deque(maxlen=100))
-            if state['time']!=self.last_time and state['state'] in ('measured-supported','estimated'):history.append(p.copy())
+            if id in state.get('position_reacquired',[]):history.clear()
+            if state['time']!=self.last_time and node_state in ('measured-supported','estimated'):history.append(p.copy())
             if self.options['trails'] and len(history)>1:
                 self.coords(trail,*[v for point in history for v in self.project(point,center)]);self.itemconfigure(trail,state='normal')
             sigma=state.get('uncertainty')
@@ -90,13 +101,15 @@ class Scene(tk.Canvas):
                 radius=min(200,max(2,2*sigma*self.scale));self.coords(uncertainty,x-radius,y-radius,x+radius,y+radius);self.itemconfigure(uncertainty,state='normal')
         self.last_time=state['time']
         model='PLANAR 2D · Z=0 assumed' if state.get('dimensions',3)==2 else 'RELATIVE 3D'
+        if state.get('metrics',{}).get('cooperative'):model='ALL MOBILE · CENTROID-RELATIVE XY · Z=0 assumed'
+        if state.get('metrics',{}).get('origin_node'):model='SNIFFER ORIGIN · RELATIVE HEADING · Z=0 assumed'
         self.itemconfigure(self.title,text=f"{state.get('source','').upper()}  |  {model}  |  {self.projection}  |  {state['state'].upper()}\n"+(state.get('reason','') if not positions else 'Orbit: drag · Pan: Shift-drag · Zoom: wheel · metres'))
         self.tag_raise(self.title)
 
 
 class UWB3DView(ttk.Frame):
     def __init__(self,parent,app):
-        super().__init__(parent);self.app=app;self.runtime=Runtime(app.loop);self.pending=None;self.paused=False;self.last_render=deque(maxlen=100);self.last_snapshot={}
+        super().__init__(parent);self.app=app;self.runtime=Runtime(app.loop);self.pending=None;self.paused=False;self.last_render=deque(maxlen=100);self.last_snapshot={};self.position_gate=PositionGate();self.gate_start=None;self.gate_generation=None
         tabs=ttk.Notebook(self);tabs.pack(fill='both',expand=True);self.tabs=tabs
         live=ttk.Frame(tabs,padding=8);tabs.add(live,text='3D network')
         self.legacy=CooperativeView(tabs,lambda:app.prepare_multi(True),lambda:app.start_multi(True),app.stop_fleet)
@@ -104,7 +117,7 @@ class UWB3DView(ttk.Frame):
         matrix=ttk.Frame(tabs,padding=8);tabs.add(matrix,text='Distance matrix');self.matrix_page=matrix
         ttk.Label(live,text='UWB 3D Tracking · mobile nodes · relative frame',font=('Segoe UI',16,'bold')).pack(anchor='w')
         controls=ttk.Frame(live);controls.pack(fill='x',pady=5)
-        self.source=tk.StringVar(value='simulation');ttk.Combobox(controls,textvariable=self.source,values=('simulation','replay','uart','gateway','reference','legacy'),width=11,state='readonly').pack(side='left')
+        self.source=tk.StringVar(value='simulation');ttk.Combobox(controls,textvariable=self.source,values=('swarm','simulation','replay','uart','gateway','reference','legacy'),width=11,state='readonly').pack(side='left')
         self.count=tk.IntVar(value=30);ttk.Spinbox(controls,from_=2,to=30,textvariable=self.count,width=4).pack(side='left',padx=4)
         self.scenario=tk.StringVar(value='Random motion');ttk.Combobox(controls,textvariable=self.scenario,values=SCENARIOS,width=18,state='readonly').pack(side='left')
         self.port=tk.StringVar();ttk.Entry(controls,textvariable=self.port,width=8).pack(side='left',padx=4)
@@ -114,11 +127,13 @@ class UWB3DView(ttk.Frame):
         ttk.Button(controls,text='Pause view',command=self.pause).pack(side='left',padx=4)
         ttk.Button(controls,text='Reset frame',command=lambda:self.submit(self.runtime.reset())).pack(side='left')
         ttk.Button(controls,text='Reference setup',command=self.reference_setup).pack(side='left')
+        ttk.Button(controls,text='Swarm calibration',command=self.swarm_calibration).pack(side='left')
         second=ttk.Frame(live);second.pack(fill='x')
         self.mode=tk.StringVar(value='Full mesh simulation');ttk.Combobox(second,textvariable=self.mode,state='readonly',width=23,values=('Full mesh simulation','Sparse simulation')).pack(side='left')
         self.rate=tk.DoubleVar(value=10);ttk.Label(second,text='Publish Hz').pack(side='left');ttk.Spinbox(second,from_=1,to=30,textvariable=self.rate,width=4).pack(side='left')
         self.age=tk.DoubleVar(value=.5);ttk.Label(second,text='Age s').pack(side='left');ttk.Spinbox(second,from_=.1,to=5,increment=.1,textvariable=self.age,width=4).pack(side='left')
-        self.filtering=tk.BooleanVar(value=True);ttk.Checkbutton(second,text='CV filter',variable=self.filtering).pack(side='left',padx=4)
+        self.filtering=tk.BooleanVar(value=True);ttk.Checkbutton(second,text='Kalman',variable=self.filtering).pack(side='left',padx=4)
+        self.range_filtering=tk.BooleanVar(value=True);ttk.Checkbutton(second,text='Range filter',variable=self.range_filtering).pack(side='left')
         self.imu_gate=tk.BooleanVar(value=True);ttk.Checkbutton(second,text='IMU gate',variable=self.imu_gate).pack(side='left')
         self.speed=tk.DoubleVar(value=1);ttk.Label(second,text='Replay ×').pack(side='left');ttk.Spinbox(second,from_=.25,to=8,increment=.25,textvariable=self.speed,width=4).pack(side='left')
         self.seek=tk.DoubleVar(value=0);ttk.Label(second,text='Seek s').pack(side='left');ttk.Entry(second,textvariable=self.seek,width=5).pack(side='left')
@@ -127,6 +142,8 @@ class UWB3DView(ttk.Frame):
         ttk.Button(second,text='Register node',command=self.register).pack(side='left')
         self.scene=Scene(live);self.scene.pack(fill='both',expand=True,pady=6)
         options=ttk.Frame(live);options.pack(fill='x')
+        self.sniffer_origin=tk.BooleanVar(value=False)
+        ttk.Checkbutton(options,text='Sniffer origin (stationary)',variable=self.sniffer_origin).pack(side='left')
         self.projection=tk.StringVar(value='3D');box=ttk.Combobox(options,textvariable=self.projection,values=('3D','XY','XZ','YZ'),width=4,state='readonly');box.pack(side='left');box.bind('<<ComboboxSelected>>',lambda e:self.project())
         self.geometry=tk.StringVar(value='Relative 3D')
         ttk.Combobox(options,textvariable=self.geometry,values=('Relative 3D','Tabletop 2D'),width=12,state='readonly').pack(side='left')
@@ -163,28 +180,39 @@ class UWB3DView(ttk.Frame):
         try:
             self.runtime.config.dimensions=2 if self.geometry.get()=='Tabletop 2D' else 3
             self.runtime.config.target_rate_hz=self.rate.get();self.runtime.config.max_age=self.age.get();self.runtime.config.filtering=self.filtering.get();self.runtime.config.imu_motion_gating=self.imu_gate.get();self.runtime.config.validate()
+            self.runtime.config.range_filtering=self.range_filtering.get()
             source=self.source.get();kwargs={}
             if source=='simulation':kwargs=dict(count=self.count.get(),scenario=self.scenario.get(),sparse=self.mode.get().startswith('Sparse'))
             elif source=='replay':
                 path=filedialog.askopenfilename(filetypes=[('U3D sessions','*.jsonl')])
                 if not path:return
                 kwargs=dict(path=path,speed=self.speed.get(),seek=self.seek.get())
-            elif source in ('uart','gateway','reference'):
+            elif source in ('uart','gateway','reference','swarm'):
                 if self.app.busy or self.app.fleet is not None:raise ValueError('Stop the existing fleet and wait for hardware operations first')
                 port=self.port.get().strip()
                 if not port:raise ValueError('Enter the gateway UART COM port; ST-Link is not UART')
                 if any(getattr(s,'port',None)==port for s in self.app.sessions.values()):raise ValueError('Port already used by Control Center')
                 kwargs=dict(port=port)
-                if source in ('gateway','reference'):
+                if source in ('gateway','reference','swarm'):
                     if self.app.sessions:raise ValueError('Disconnect individual control sessions before configuring the gateway fleet')
                     boards=[dict(b) for b in self.app.selected()]
+                    if source=='swarm':
+                        if not 4<=len(boards)<=18:raise ValueError('Swarm UART: select one sniffer plus 3–17 mobile nodes')
+                        self.runtime.config.swarm_origin=len(boards) if self.sniffer_origin.get() else 0
+                        self.geometry.set('Tabletop 2D');self.projection.set('XY');self.project();self.rate.set(25)
+                    if source=='reference' and not 2<=len(boards)<=9:raise ValueError('Reference mode: select 2–9 boards in Boards & OTA')
                     if not 2<=len(boards)<=30:raise ValueError('Select 2–30 boards in Boards & OTA')
-                    gateway=simpledialog.askstring('Mobile coordinator / UART gateway','Exact board name connected to this UART port:',initialvalue=boards[0]['name'])
+                    gateway=simpledialog.askstring('UWB collector / sniffer' if source=='swarm' else 'Mobile coordinator / UART gateway','Exact board name connected to this UART port:',initialvalue=boards[0]['name'])
                     if gateway is None:return
                     if gateway not in {b['name'] for b in boards}:raise ValueError('Gateway must be a selected board')
                     kwargs['boards']=sorted(boards,key=lambda b:(b['name']!=gateway,b['name']))
             self.scene.trails.clear();self.link_samples.clear();self.submit(self.runtime.start(source,**kwargs))
         except Exception as exc:messagebox.showerror('3D tracking',str(exc))
+    def swarm_calibration(self):
+        if self.runtime.tasks:
+            messagebox.showinfo('Swarm calibration','Stop tracking before changing calibration.');return
+        path=filedialog.askopenfilename(title='Residual body-mounted pair calibration (hardware UIDs)',filetypes=[('Calibration JSON','*.json')])
+        if path:self.runtime.config.swarm_calibration=path
     def reference_setup(self):
         if self.runtime.tasks:
             messagebox.showinfo('Reference DS-TWR','Stop the current session before changing reference settings.');return
@@ -199,6 +227,8 @@ class UWB3DView(ttk.Frame):
             c.reference_period_ms=period;c.reference_tag=tag;c.reference_anchor_mask=mask
             c.max_age=max(c.max_age,2.0);self.age.set(c.max_age);self.source.set('reference')
             self.message='Reference: INIT / REQUEST / RESPONSE / REPORT / FINAL; requires reference.signed.bin'
+            self.projection.set('XY');self.project()
+            self.dashboard.set(self.message+' · stopped · select 2–9 boards and gateway UART')
         except ValueError as exc:messagebox.showerror('Reference setup',str(exc))
     def pause(self):self.paused=not self.paused
     def pause_replay(self):self.runtime.replay_paused=not self.runtime.replay_paused
@@ -230,6 +260,7 @@ class UWB3DView(ttk.Frame):
                     self.runtime.config=Config(**json.loads(Path(name).read_text())).validate()
                     self.geometry.set('Tabletop 2D' if self.runtime.config.dimensions==2 else 'Relative 3D')
                     self.rate.set(self.runtime.config.target_rate_hz);self.age.set(self.runtime.config.max_age);self.filtering.set(self.runtime.config.filtering);self.imu_gate.set(self.runtime.config.imu_motion_gating)
+                    self.range_filtering.set(self.runtime.config.range_filtering)
                 except Exception as exc:messagebox.showerror('Configuration',str(exc))
     def register(self):
         value=simpledialog.askstring('Manual node','Node ID (decimal), hardware UID (decimal), name')
@@ -239,22 +270,42 @@ class UWB3DView(ttk.Frame):
             async def job():await self.app.loop.run_in_executor(self.runtime.executor,lambda:self.runtime.engine.registry.register(id,uid,time.monotonic(),name.strip()))
             self.submit(job())
         except Exception as exc:messagebox.showerror('Node registration',str(exc))
+    def filtered_snapshot(self):
+        source=self.runtime.snapshot() or {};now=time.monotonic()
+        if not source:return {}
+        if self.gate_generation!=self.runtime.generation:
+            self.gate_start=None;self.gate_generation=self.runtime.generation
+        if self.runtime.source=='swarm' and self.gate_start!='ready':
+            # Do not establish speed baselines from a partially configured fleet.
+            complete=len(source.get('positions',{}))>=self.count.get()
+            if not complete or 'configuring' in source.get('error',''):
+                self.gate_start=None
+            elif self.gate_start is None:self.gate_start=now
+            if self.gate_start is not None and now-self.gate_start>=1.:
+                self.gate_start='ready'
+            else:
+                waiting=deepcopy(source);waiting['positions']={}
+                waiting['reason']='Waiting for full fleet before initializing speed gate'
+                return waiting
+        return self.position_gate.update(source,self.runtime.generation,now)
+
     def tick(self):
         tick_started=time.monotonic()
         if self.pending and self.pending.done():
             try:self.pending.result();self.message=''
             except Exception as exc:self.message=str(exc)
             self.pending=None
-        state=self.runtime.snapshot()
+        state=self.filtered_snapshot()
         if state and not self.paused:
             self.last_snapshot=state;self.scene.render(state);now=time.monotonic();self.last_render.append(now)
             for node in state['nodes']:
                 id=node['id'];p=state['positions'].get(id);velocity=state['velocity'].get(id)
                 neighbors=sum(id in (r['a'],r['b']) for r in state['edges']);online=id in state['ids']
-                values=(f'{id:04X}','online' if online else 'offline',' / '.join(f'{v:.2f}' for v in p) if p is not None else '—',
+                node_uncertainty=state['metrics'].get('node_quality',{}).get(id,{}).get('uncertainty',state['uncertainty'])
+                values=(f'{id:04X}','ranging' if online else 'no fresh ranges',' / '.join(f'{v:.2f}' for v in p) if p is not None else '—',
                     f'{np.linalg.norm(velocity):.2f}' if velocity is not None else '—',f'{now-node["last"]:.2f}s',neighbors,
-                    f'±{state["uncertainty"]:.2f}m*' if p is not None and state['uncertainty'] is not None else '—',
-                    '—' if node['battery'] is None else f'{node["battery"]:.1f}%',state['state'] if online else 'offline')
+                    f'±{node_uncertainty:.2f}m*' if p is not None and node_uncertainty is not None else '—',
+                    '—' if node['battery'] is None else f'{node["battery"]:.1f}%',state.get('node_states',{}).get(id,state['state'] if online else 'stale'))
                 if self.table.exists(str(id)):self.table.item(str(id),values=values)
                 else:self.table.insert('','end',iid=str(id),values=values)
             present={str(n['id']) for n in state['nodes']}
@@ -263,13 +314,13 @@ class UWB3DView(ttk.Frame):
             m=state['metrics'];parser=m['parser'];seen=parser.get('accepted',0);lost=parser.get('dropped',0)
             hz=sum(now-t<1 for t in self.last_render);latency=max(0.,now-state.get('published_at',state['time']))*1000
             age='—' if state['age'] is None else f"{state['age']:.3f}"
-            net=state['network'];mode={2:'experimental sparse BP',3:'reference TDMA / STS DS-TWR'}.get(net.get('mode'),self.mode.get() if state['source']=='simulation' else 'unknown')
+            net=state['network'];mode={2:'experimental sparse BP',3:'reference TDMA / STS DS-TWR',4:'Swarm: weighted SMACOF / Kabsch / EKF'}.get(net.get('mode'),self.mode.get() if state['source']=='simulation' else 'unknown')
             error=f' · SIM aligned RMSE {state["simulation_rmse"]:.3f}m' if 'simulation_rmse' in state else ''
             self.dashboard.set(f"{state['source'].upper()} · {len(state['ids'])}/{len(state['nodes'])} online · links {m['valid_edges']}/{m['possible_edges']} · stale {m['stale_edges']} · packet loss {lost}/{seen+lost}\n"
-                f"Ranges {m['measurement_hz']}/s · localization {m['localization_hz']}/s · render {hz}/s · solver {m['solver_ms']:.1f}ms · publication→render {latency:.1f}ms · range age {age}s{error}\n"
+                f"Ranges {m['measurement_hz']}/s · localization {m['localization_hz']}/s · render {hz}/s · solver {m['solver_ms']:.1f}ms · publication→render {latency:.1f}ms · range age {age}s{error} · range filter {'on' if m.get('range_filtering') else 'off'} / spikes {m.get('range_spikes_rejected',0)}\n"
                 f"{state['reason']} · {state.get('error','')} {self.message} · drops {m['queue_drops']}/{m['log_drops']} · {mode} · frame {net.get('superframe','—')} · sync {net.get('synchronized','unknown')} · *relative conditional uncertainty")
             self.update_matrix(state)
-        self.after(max(1,100-round((time.monotonic()-tick_started)*1000)),self.tick)
+        self.after(max(1,(40 if self.source.get()=='swarm' else 100)-round((time.monotonic()-tick_started)*1000)),self.tick)
     def update_matrix(self,state):
         ids=state['ids']
         if ids!=self.matrix_ids:

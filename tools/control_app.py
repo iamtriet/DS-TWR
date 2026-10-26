@@ -129,6 +129,12 @@ class ControlApp:
         self.uwb3d = UWB3DView(tabs,self)
         self.auto_view = self.uwb3d.legacy
         tabs.add(self.uwb3d, text="UWB 3D Tracking")
+        from virtual_geofencing_view import VirtualGeofencingView
+        self.geofencing=VirtualGeofencingView(tabs,self)
+        tabs.add(self.geofencing,text="Virtual Geofencing")
+        from led_tracking_view import LEDTrackingView
+        self.led_tracking=LEDTrackingView(tabs,self)
+        tabs.add(self.led_tracking,text="UV / RGB Control")
         self.active_multi_view = self.multi_view
 
         console = ttk.Frame(tabs, padding=12); tabs.add(console, text="Console & Logs")
@@ -339,7 +345,7 @@ class ControlApp:
 
 
 
-    def run(self, label, factory, done=None):
+    def run(self, label, factory, done=None, preserve_tracking=False):
 
         if self.busy or self.closing:
 
@@ -355,7 +361,7 @@ class ControlApp:
 
             try:
 
-                if self.uwb3d.runtime.gateway is not None:
+                if self.uwb3d.runtime.gateway is not None and not preserve_tracking:
                     await self.uwb3d.runtime.stop()
 
                 result = await factory()
@@ -1114,6 +1120,8 @@ class ControlApp:
 
 
     def close(self):
+        if self.geofencing.mission.running:self.geofencing.pause()
+        elif self.geofencing.mission.tracks:self.geofencing.autosave()
 
         if self.busy:
 

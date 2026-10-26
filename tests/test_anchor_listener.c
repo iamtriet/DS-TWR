@@ -19,6 +19,8 @@ bool multitag_running(void) { return false; }
 void multitag_stop(void) {}
 bool network_running(void) { return false; }
 void network_stop(void) {}
+bool swarm_running(void) { return false; }
+void swarm_stop(void) {}
 void multitag_service(void) {}
 const radio_stats_t *radio_stats(void) { return &stats; }
 void radio_status(void) {}

@@ -6,6 +6,7 @@
 #include "uwb_network.h"
 #include "uwb_reference.h"
 #include "dstwr_tdma.h"
+#include "uwb_swarm.h"
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -22,7 +23,7 @@ static int last_rc;
 static int last_stop_rc;
 static uint32_t transient_errors;
 bool uwb_is_anchor(void) { return anchor; }
-bool uwb_running(void) { return continuous || multitag_running() || network_running() || reference_running() || (dstwr_get_state()->sync_state != 0); }
+bool uwb_running(void) { return continuous || multitag_running() || network_running() || reference_running() || (dstwr_get_state()->sync_state != 0) || swarm_running(); }
 bool uwb_configured(void) { return my_id && peer_id && my_id!=peer_id; }
 uint16_t uwb_local_id(void) { return my_id; }
 static uint32_t next_token(void)
@@ -37,6 +38,7 @@ void uwb_stop_all(void)
     network_stop();
     reference_stop();
     dstwr_stop();
+    swarm_stop();
     if (radio_stats()->ready) { int rc=radio_stop(); if (rc) out("UWB stop rc=%d",rc); }
 }
 int uwb_init(void) { uwb_stop_all(); return radio_init(); }
@@ -102,16 +104,29 @@ int uwb_command(int argc,char **argv)
     if (!argc) return -EINVAL;
     const char *cmd=argv[0];
     if (!strcmp(cmd,"capabilities") && argc==1) {
+#ifdef SWARM_RANGING
+        out("SWARM broadcast_DS_TWR=1 passive_sniffer=1 slots=30 slot_us=1300 protocol=1");
+#endif
 #ifdef REFERENCE_RANGING
         out("U3D version=1 reference_tdma=1 experimental_sparse_BP=0 STS=1 AES=1 security_qualified=0 max_nodes=9");
+#elif defined(SWARM_RANGING)
+        out("U3D version=1 passive_sniffer=1 uart_baud=1000000 max_uart_nodes=17 max_mobile_nodes=30 qualified=0");
 #else
         out("U3D version=1 uart_range_export=1 experimental_sparse_BP=1 qualified_BP=0 extended_frame=1 STS=0 max_radio_frame=512");
 #endif
+#if !defined(REFERENCE_RANGING) && !defined(SWARM_RANGING)
         out("U3D net start experimental: min slot 10ms, max superframe 500ms; 30-node/10Hz NOT qualified");
+#endif
         return 0;
     }
     if (!strcmp(cmd,"status") && argc==1) { uwb_status(); return 0; }
     if (!strcmp(cmd,"stop") && argc==1) { uwb_stop_all(); return 0; }
+#if defined(REFERENCE_RANGING) || defined(SWARM_RANGING)
+    if (ota_connected() || uwb_running()) return -EBUSY;
+    if (!strcmp(cmd,"init") && argc==1) return uwb_init();
+    /* Separate image: do not mix legacy PHY commands into a reference session. */
+    return -ENOTSUP;
+#endif
     if (!strcmp(cmd,"output") && argc==2) {
         if (!strcmp(argv[1],"csv")) { csv=true;binary=false; }
         else if (!strcmp(argv[1],"text")) { csv=false;binary=false; }

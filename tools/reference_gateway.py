@@ -18,6 +18,7 @@ class ReferenceFleet(GatewayFleet):
         self.period_ms=period_ms;self.tag=tag;self.anchor_mask=anchor_mask;self.network_id=network_id
 
     async def configure(self):
+        self.identities.clear()
         # Read every UID before starting anyone; coordinator gets a verified roster.
         for i,board in enumerate(self.boards):
             session=self.session(board)

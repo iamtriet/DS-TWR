@@ -91,7 +91,7 @@ class Scene(tk.Canvas):
             if node_state=='outlier-rejected':name+=' · HELD'
             elif id in state.get('stationary_held',[]):name+=' · QUIET LOCK'
             self.coords(label,x+10,y);self.itemconfigure(label,text=name,state='normal' if self.options['labels'] else 'hidden')
-            history=self.trails.setdefault(id,deque(maxlen=100))
+            history=self.trails.setdefault(id,deque(maxlen=500))
             if id in state.get('position_reacquired',[]):history.clear()
             if state['time']!=self.last_time and node_state in ('measured-supported','estimated'):history.append(p.copy())
             if self.options['trails'] and len(history)>1:
@@ -197,16 +197,35 @@ class UWB3DView(ttk.Frame):
                     if self.app.sessions:raise ValueError('Disconnect individual control sessions before configuring the gateway fleet')
                     boards=[dict(b) for b in self.app.selected()]
                     if source=='swarm':
-                        if not 4<=len(boards)<=18:raise ValueError('Swarm UART: select one sniffer plus 3–17 mobile nodes')
-                        self.runtime.config.swarm_origin=len(boards) if self.sniffer_origin.get() else 0
                         self.geometry.set('Tabletop 2D');self.projection.set('XY');self.project();self.rate.set(25)
+                        self.runtime.config.dimensions=2
                     if source=='reference' and not 2<=len(boards)<=9:raise ValueError('Reference mode: select 2–9 boards in Boards & OTA')
                     if not 2<=len(boards)<=30:raise ValueError('Select 2–30 boards in Boards & OTA')
-                    gateway=simpledialog.askstring('UWB collector / sniffer' if source=='swarm' else 'Mobile coordinator / UART gateway','Exact board name connected to this UART port:',initialvalue=boards[0]['name'])
-                    if gateway is None:return
-                    if gateway not in {b['name'] for b in boards}:raise ValueError('Gateway must be a selected board')
-                    kwargs['boards']=sorted(boards,key=lambda b:(b['name']!=gateway,b['name']))
-            self.scene.trails.clear();self.link_samples.clear();self.submit(self.runtime.start(source,**kwargs))
+                    kwargs['boards']=boards
+            use_sniffer_origin=self.sniffer_origin.get()
+            available_boards=[dict(b) for b in self.app.devices.values()]
+            async def begin():
+                if source in ('gateway','reference','swarm'):
+                    if self.runtime.tasks:raise ValueError('Stop the existing tracking session before identifying UART')
+                    from uart_discovery import probe_port
+                    identity=await asyncio.to_thread(probe_port,port)
+                    gateway=identity['name']
+                    selected=kwargs['boards']
+                    if gateway not in {b['name'] for b in selected}:
+                        match=next((b for b in available_boards if b['name']==gateway),None)
+                        if match is None:raise ValueError(f"{port} is {gateway}, but it is absent from BLE discovery. Scan BLE again; no ID entry is needed.")
+                        selected.append(match)
+                    limit=18 if source=='swarm' else 9 if source=='reference' else 30
+                    if not (4 if source=='swarm' else 2)<=len(selected)<=limit:
+                        raise ValueError(f'Tracking requires {4 if source=="swarm" else 2}–{limit} boards including {gateway} on {port}')
+                    expected_baud=1000000 if source=='swarm' else 115200
+                    if identity['baud']!=expected_baud:raise ValueError(f'{port}: firmware UART speed does not match selected tracking mode')
+                    kwargs['boards']=sorted(selected,key=lambda b:(b['name']!=gateway,b['name']))
+                    if source=='swarm':self.runtime.config.swarm_origin=len(selected) if use_sniffer_origin else 0
+                    self.app.emit('gateway',f'Auto-identified {port}: {gateway}, UID={identity["uid"]}')
+                await self.app.led_tracking.controls.close_connections()
+                await self.runtime.start(source,**kwargs)
+            self.scene.trails.clear();self.link_samples.clear();self.submit(begin())
         except Exception as exc:messagebox.showerror('3D tracking',str(exc))
     def swarm_calibration(self):
         if self.runtime.tasks:
@@ -277,7 +296,9 @@ class UWB3DView(ttk.Frame):
             self.gate_start=None;self.gate_generation=self.runtime.generation
         if self.runtime.source=='swarm' and self.gate_start!='ready':
             # Do not establish speed baselines from a partially configured fleet.
-            complete=len(source.get('positions',{}))>=self.count.get()
+            fleet=getattr(self.runtime,'gateway',None)
+            expected=getattr(fleet,'count',self.count.get())
+            complete=len(source.get('positions',{}))>=expected
             if not complete or 'configuring' in source.get('error',''):
                 self.gate_start=None
             elif self.gate_start is None:self.gate_start=now
@@ -285,7 +306,7 @@ class UWB3DView(ttk.Frame):
                 self.gate_start='ready'
             else:
                 waiting=deepcopy(source);waiting['positions']={}
-                waiting['reason']='Waiting for full fleet before initializing speed gate'
+                waiting['reason']=f'Waiting for fleet positions ({len(source.get("positions",{}))}/{expected}) before initializing speed gate'
                 return waiting
         return self.position_gate.update(source,self.runtime.generation,now)
 
@@ -296,7 +317,7 @@ class UWB3DView(ttk.Frame):
             except Exception as exc:self.message=str(exc)
             self.pending=None
         state=self.filtered_snapshot()
-        if state and not self.paused:
+        if state and not self.paused and self.winfo_viewable():
             self.last_snapshot=state;self.scene.render(state);now=time.monotonic();self.last_render.append(now)
             for node in state['nodes']:
                 id=node['id'];p=state['positions'].get(id);velocity=state['velocity'].get(id)

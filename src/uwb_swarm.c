@@ -93,6 +93,7 @@ bool swarm_running(void) { return running; }
 void swarm_stop(void)
 {
     bool was=running;running=false;synced=false;pending=false;
+    swarm_timer_stop();
     radio_swarm_cancel();
     if(was) { radio_stop();radio_network_phy(false);radio_port_fast(false); }
 }

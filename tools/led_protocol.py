@@ -1,4 +1,4 @@
-"""Logical colours -> firmware 1.2.7 pin labels, corrected by observed LED colours."""
+"""Logical colours -> legacy firmware pin labels, corrected by observed LED colours."""
 import re
 
 def wire_command(command):
@@ -6,8 +6,7 @@ def wire_command(command):
     if not re.fullmatch(r'led aux rgb [01] [01] [01] [01] [01] [01]',command):raise ValueError('Unsupported LED command')
     r1,g1,b1,r2,g2,b2=command.split()[3:]
     # Old R emits blue, old G emits red, old B emits green.
-    # The unavailable old R1 output is consequently physical BLUE 1.
-    if b1!='0':raise ValueError('Blue 1 is unavailable (DW3110 GPIO3)')
+    # Physical BLUE 1 is rewired to P0.02 in firmware 1.2.8.
     return 'led aux rgb '+' '.join((b1,r1,g1,b2,r2,g2))
 
 def logical_status(line):

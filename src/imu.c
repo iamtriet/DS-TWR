@@ -10,6 +10,9 @@
 #include <math.h>
 #include "uwb_swarm.h"
 K_MUTEX_DEFINE(imu_lock);
+#ifdef SWARM_RANGING
+K_SEM_DEFINE(imu_event,0,1);
+#endif
 
 static const struct device *bus, *gpio;
 static bool opened, ready, streaming, reset_pending;
@@ -27,7 +30,13 @@ static float acc[3],gyro[3],mag[3],quat[4],linear[3];
 static uint8_t accuracy[5];
 static const uint8_t sensors[]={SH2_ACCELEROMETER,SH2_GYROSCOPE_CALIBRATED,SH2_MAGNETIC_FIELD_CALIBRATED,SH2_ROTATION_VECTOR,SH2_LINEAR_ACCELERATION};
 static void int_event(const struct device *dev,struct gpio_callback *cb,uint32_t pins)
-{ ARG_UNUSED(dev); ARG_UNUSED(cb); ARG_UNUSED(pins); atomic_set(&int_time,(uint32_t)(k_uptime_get()*1000)); }
+{
+    ARG_UNUSED(dev); ARG_UNUSED(cb); ARG_UNUSED(pins);
+    atomic_set(&int_time,(uint32_t)(k_uptime_get()*1000));
+#ifdef SWARM_RANGING
+    k_sem_give(&imu_event);
+#endif
+}
 static int hal_open(sh2_Hal_t *hal)
 {
     ARG_UNUSED(hal);
@@ -235,7 +244,15 @@ void imu_service(void)
 static void imu_worker(void *a,void *b,void *c)
 {
     ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
-    for(;;) { if(swarm_running())imu_service();k_msleep(2); }
+    for(;;) {
+        if(swarm_running())imu_service();
+        /* INT is active-low and can stay asserted across multiple packets.
+         * Keep draining at the original cadence in that case (also on GPIO
+         * error); otherwise sleep until an edge, with a missed-edge fallback.
+         * A queued edge between the pin read and take is not lost. */
+        bool drain=ready && gpio && gpio_pin_get_raw(gpio,IMU_INT)!=1;
+        k_sem_take(&imu_event,K_MSEC(drain ? 2 : 20));
+    }
 }
 /* Lower priority than the radio/main loop; I2C service is outside the radio/main loop. */
 K_THREAD_DEFINE(imu_worker_id,4096,imu_worker,NULL,NULL,NULL,5,0,0);

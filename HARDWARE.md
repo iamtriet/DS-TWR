@@ -1,3 +1,13 @@
+> **Cập nhật phần cứng đã được người dùng xác nhận — 2026-10-26:**
+> RGB **B1 (xanh dương, cụm 1) đã được nối sang nRF52833 P0.02**.
+> Không dùng DW3110 GPIO3 cho B1 trên các board đã sửa. Firmware swarm 1.2.8+
+> hỗ trợ đủ sáu kênh RGB. P0.02 dùng cho **UV phải ở chế độ UV** hoặc
+> **B1 ở chế độ RGB**, không phải hai đầu ra độc lập đồng thời.
+> Màu thực tế: R1=P0.30, G1=P0.31, B1=P0.02;
+> R2=P0.07, G2=P0.23, B2=P0.27 (đã hiệu chỉnh thứ tự màu theo quan sát).
+> Ghi chú này thay thế các kết luận B1/R1 không hỗ trợ trong tài liệu cũ;
+> sơ đồ gốc bên dưới được giữ làm lịch sử, chưa phản ánh dây đã sửa.
+
 # Cyborg greenC — Hardware Reference
 
 **Board:** Cyborg greenC v001 (36.5 × 45.5 mm)  

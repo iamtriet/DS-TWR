@@ -1,4 +1,5 @@
-/* Manual daughterboard outputs. Never commandeer DW3110 GPIO3 (RGB R1). */
+/* Hardware revision confirmed 2026-10-26: physical RGB B1 = P0.02.
+ * Legacy wire R1 is physical blue; UV right shares P0.02 in UV mode. */
 #include "validation.h"
 #include <drivers/gpio.h>
 #include <string.h>
@@ -30,8 +31,8 @@ int aux_led_command(int argc,char **argv)
 {
     uint8_t values[6]={0};int rc;
     if(argc==1 && !strcmp(argv[0],"status")){
-        out("AUX_LED v=1 profile=%s UV_L=%u UV_R=%u RGB_R1=unsupported RGB_G1=%u RGB_B1=%u RGB_R2=%u RGB_G2=%u RGB_B2=%u",
-            profile,levels[0],levels[1],levels[0],levels[2],levels[3],levels[4],levels[5]);return 0;
+        out("AUX_LED v=1 profile=%s UV_L=%u UV_R=%u RGB_R1=%u RGB_G1=%u RGB_B1=%u RGB_R2=%u RGB_G2=%u RGB_B2=%u",
+            profile,levels[0],levels[1],levels[1],levels[0],levels[2],levels[3],levels[4],levels[5]);return 0;
     }
     if(argc==1 && !strcmp(argv[0],"off")){
         rc=apply(values);if(!rc)profile="off";return rc;
@@ -40,8 +41,7 @@ int aux_led_command(int argc,char **argv)
     bool rgb=argc==7 && !strcmp(argv[0],"rgb");
     if(!uv && !rgb)return -EINVAL;
     for(int i=1;i<argc;i++)if(strcmp(argv[i],"0") && strcmp(argv[i],"1"))return -EINVAL;
-    if(rgb && !strcmp(argv[1],"1"))return -ENOTSUP;
     if(uv){values[0]=argv[1][0]-'0';values[1]=argv[2][0]-'0';}
-    else {values[0]=argv[2][0]-'0';for(int i=3;i<7;i++)values[i-1]=argv[i][0]-'0';}
+    else {values[1]=argv[1][0]-'0';values[0]=argv[2][0]-'0';for(int i=3;i<7;i++)values[i-1]=argv[i][0]-'0';}
     rc=apply(values);if(!rc)profile=uv?"uv":"rgb";return rc;
 }

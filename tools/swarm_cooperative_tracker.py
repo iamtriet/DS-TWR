@@ -65,19 +65,34 @@ class CooperativeRangeTracker:
         if len(edges)<2*n-3:raise ValueError('Insufficient ranges to constrain the moving swarm')
         epoch=max(r.effective for r in edges)
         # Fit each link once per solve, not once per endpoint and decision.
-        trends={}
+        trends={};motion_trends={}
         for r in edges:
             key=tuple(sorted((r.a,r.b)));rows=history.get(key,())
             trends[key]=range_window(rows,rows[-1][0],.6) if rows else None
+            motion_trends[key]=range_window(rows,rows[-1][0],.24) if rows else None
         if ids!=self.ids or self.warmup_until is None:self.warmup_until=epoch+1.
-        quality={};quiet=set();process=[];candidates=set();stable=set();departing=set()
+        quality={};quiet=set();process=[];candidates=set();stable=set();departing=set();imu_departing=set()
         for node in ids:
             imu=nodes[node].imu
+            if node==self.origin:
+                # A configured stationary collector is a measured reference,
+                # not an IMU-dependent mobile member. Include it in stable
+                # triangles even if its IMU is unavailable or vibrating.
+                candidates.add(node)
+                for other in ids:
+                    if other==node:continue
+                    v=trends.get(tuple(sorted((node,other))))
+                    if v and v['samples']>=12 and now-v['newest']<.25 and abs(v['radial_speed'])<.06 and v['sigma']<.04:
+                        stable.add(tuple(sorted((node,other))))
+                process.append(0.)
+                quality[node]={'relative_rest':True,'fixed_collector':True,'bno_fresh':False}
+                continue
             fresh=bool(use_imu and imu and 0<=now-imu['received']<.25 and imu.get('sample_age_ms',1000)<=100)
             bno=fresh and imu.get('sensor')=='BNO085'
             if bno and imu['moving']:self.last_motion=now
             if bno:self.last_bno[node]=now
-            if bno and (imu['moving'] or imu['quiet_ms']<500):departing.add(node)
+            if bno and (imu['moving'] or imu['quiet_ms']<500):
+                departing.add(node);imu_departing.add(node)
             if now-self.last_bno.get(node,-np.inf)>.35:departing.add(node)
             quiet_links=0
             if bno and not imu['moving'] and imu['quiet_ms']>=2000:
@@ -106,12 +121,32 @@ class CooperativeRangeTracker:
         # A noisy edge must not rebuild the coordinate frame on every sample.
         # IMU motion releases immediately; coherent relative range velocity
         # also releases constant-speed motion that an accelerometer cannot see.
+        # A vibration flag is not displacement. In collector-origin mode,
+        # two nonparallel, stable links to other resting peers can contradict
+        # an isolated IMU motion flag. Missing/stale IMU is never overridden.
+        if self.origin and self.x is not None and ids==self.ids:
+            for node in imu_departing.intersection(self.rest_members):
+                directions=[]
+                for other in (self.rest_members|{self.origin})-imu_departing-{node}:
+                    if other not in index:continue
+                    key=tuple(sorted((node,other)));v=trends.get(key);fast=motion_trends.get(key)
+                    if (v and fast and v['samples']>=12 and now-v['newest']<.15 and v['sigma']<.04
+                            and abs(v['radial_speed'])<.03 and abs(fast['radial_speed'])<.05):
+                        delta=self.x.reshape(-1,4)[index[node],:2]-self.x.reshape(-1,4)[index[other],:2]
+                        if np.linalg.norm(delta)>.05:directions.append(delta/np.linalg.norm(delta))
+                if len(directions)>=2 and np.linalg.svd(np.array(directions),compute_uv=False)[-1]>.25:
+                    departing.discard(node)
+                    quality[node]['imu_vibration_corroborated_rest']=True
         checking=self.rest_members.intersection(ids)-departing
         for node in checking:
             changing=0;still_directions=[]
             for other in checking-{node}:
                 v=trends.get(tuple(sorted((node,other))))
-                if v and v['samples']>=12 and now-v['newest']<.25 and v['sigma']<.04 and abs(v['radial_speed'])>.06:changing+=1
+                motion=motion_trends.get(tuple(sorted((node,other))))
+                if (motion and v and motion['samples']>=5 and v['samples']>=12
+                        and now-motion['newest']<.15 and motion['sigma']<.04 and v['sigma']<.04
+                        and abs(motion['radial_speed'])>.06 and abs(v['radial_speed'])>.08
+                        and motion['radial_speed']*v['radial_speed']>0):changing+=1
                 if (v and v['samples']>=12 and now-v['newest']<.25 and v['sigma']<.04
                         and abs(v['radial_speed'])<.03 and self.x is not None and ids==self.ids):
                     delta=self.x.reshape(-1,4)[index[node],:2]-self.x.reshape(-1,4)[index[other],:2]
@@ -120,11 +155,12 @@ class CooperativeRangeTracker:
             # from other wandering links. Fresh IMU motion already removed the
             # node above, so this veto never overrides measured IMU motion.
             stable_geometry=len(still_directions)>=2 and np.linalg.svd(np.array(still_directions),compute_uv=False)[-1]>.25
-            if changing>=2 and not stable_geometry and now-self.last_motion>=2.:
+            if changing>=2 and not stable_geometry:
                 self.range_motion_since.setdefault(node,now)
-                if now-self.range_motion_since[node]>=.25:departing.add(node)
+                if now-self.range_motion_since[node]>=.12:departing.add(node)
             else:self.range_motion_since.pop(node,None)
         for node in departing:self.range_motion_since.pop(node,None)
+        released=self.rest_members.intersection(departing)
         self.rest_members.intersection_update(ids)
         self.rest_members-=departing
         for node in ids:
@@ -132,7 +168,11 @@ class CooperativeRangeTracker:
                 self.rest_since.setdefault(node,now)
                 if now-self.rest_since[node]>=.2:self.rest_members.add(node)
             else:self.rest_since.pop(node,None)
-        quiet=set(self.rest_members) if len(self.rest_members)>=3 else set()
+        # With a fixed collector, previously corroborated resting peers remain
+        # independent consider states. Do not release ALL of them when one
+        # peer moves or temporarily loses IMU freshness. The anchor-free mode
+        # still requires a three-node subgroup to stabilize its free frame.
+        quiet=set(self.rest_members) if self.origin or len(self.rest_members)>=3 else set()
         if self.origin:quiet.add(self.origin)
         for node in ids:quality[node]['relative_rest']=node in quiet
         if ids!=self.ids or self.x is None:
@@ -163,6 +203,11 @@ class CooperativeRangeTracker:
             self.ids=list(ids);self.epoch=epoch;self.used={}
         dt=max(0.,epoch-self.epoch);step=min(.1,dt)
         old=self.x.reshape(n,4).copy();prior=self.x.copy();cov=self.p.copy()
+        # Rest zeroes velocity covariance. Restore motion uncertainty only on
+        # a corroborated rest-to-motion transition, not on every moving frame.
+        for node in released:
+            i=index[node]
+            cov[4*i+2:4*i+4,4*i+2:4*i+4]+=np.eye(2)*.25**2
         f=np.eye(4*n);q=np.zeros_like(cov)
         for i,node in enumerate(ids):
             sl=slice(4*i,4*i+4)
@@ -208,11 +253,12 @@ class CooperativeRangeTracker:
                 # anchor IDs; release immediately when motion evidence changes.
                 for node in quiet if epoch>=self.warmup_until else ():
                     i=index[node]
-                    # Quiet-to-quiet ranges still refine an imperfect initial
-                    # shape. Only moving-peer errors are prevented from dragging
-                    # quiet states. Never freeze a bad startup geometry forever.
-                    for row,r in enumerate(fresh):
-                        if now-self.last_motion<2. or r.a not in quiet or r.b not in quiet:k[4*i:4*i+4,row]=0.
+                    # Keep the estimator and displayed Quiet lock at the same
+                    # location. Hidden quiet-to-quiet corrections accumulated
+                    # behind the frozen marker and looked like an impossible
+                    # jump on release. Startup warmup still refines the shape;
+                    # fresh motion evidence releases each node independently.
+                    k[4*i:4*i+4,:]=0.
                 if self.origin:
                     i=index[self.origin];k[4*i:4*i+4,:]=0.
                 estimate=prior+k@(residual+h@(estimate-prior))
@@ -229,13 +275,25 @@ class CooperativeRangeTracker:
             values[:,:2]-=values[:,:2].mean(0);values[:,2:]-=values[:,2:].mean(0)
         # Bound the whole correction with one scale so recentering stays exact.
         delta=values[:,:2]-old[:,:2];largest=np.max(np.linalg.norm(delta,axis=1))
-        if step>0 and largest>step:
-            remaining=delta*(1-step/largest);values[:,:2]=old[:,:2]+delta*step/largest
+        # Stay inside the display's strict 0.6 m/s gate. The old 1 m/s
+        # correction triggered rejection/reacquisition instead of smooth motion.
+        budget=.55*step
+        if step>0 and largest>budget:
+            remaining=delta*(1-budget/largest);values[:,:2]=old[:,:2]+delta*budget/largest
             for i in range(n):cov[4*i:4*i+2,4*i:4*i+2]+=np.outer(remaining[i],remaining[i])
         # Covariance follows the same centroid/mean-velocity conditioning.
         # This is a display gauge, not an external position observation.
         gauge=np.eye(4*n)
-        if not self.origin:
+        if self.origin:
+            # Collector fixes translation, but UWB still cannot observe global
+            # yaw. Remove that display-frame gauge from covariance as well as
+            # from the aligned coordinates. Otherwise yaw uncertainty grows
+            # during motion and the display rejects a well-constrained shape.
+            # This is conditional relative uncertainty, not absolute accuracy.
+            yaw=np.c_[-values[:,1],values[:,0],-values[:,3],values[:,2]].ravel()
+            norm=float(yaw@yaw)
+            if norm>1e-9:gauge-=np.outer(yaw,yaw)/norm
+        else:
             for component in range(4):
                 indices=np.arange(component,4*n,4)
                 gauge[np.ix_(indices,indices)]-=1./n

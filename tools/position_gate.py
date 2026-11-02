@@ -45,11 +45,16 @@ class PositionGate:
             if previous_time is not None and stamp-previous_time>.3:
                 self.stationary.pop(n,None);self.quiet_since.pop(n,None)
             imu=nodes.get(n,{}).get('imu') or {}
-            quiet=imu.get('moving') is False and 0<=now-imu.get('received',0)<.3
+            q=quality.get(str(n),quality.get(n,{}))
+            # An accelerometer cannot detect constant-speed translation.
+            # For the cooperative solver, require its range-supported rest
+            # decision too; otherwise Quiet would freeze a slow moving node.
+            rest=q.get('relative_rest',False) if source.get('metrics',{}).get('cooperative') else True
+            quiet=rest and imu.get('moving') is False and 0<=now-imu.get('received',0)<.3
             if not quiet:
                 self.quiet_since.pop(n,None);self.stationary.pop(n,None)
             else:self.quiet_since.setdefault(n,stamp)
-            q=quality.get(str(n),quality.get(n,{}));sigma=q.get('filter_position_sigma_m',source.get('uncertainty'))
+            sigma=q.get('filter_position_sigma_m',source.get('uncertainty'))
             if len(p)<2 or not all(math.isfinite(v) for v in p):
                 reason='NONFINITE POSITION'
             elif n!=frame[1]:

@@ -16,7 +16,11 @@ static ssize_t command_write(struct bt_conn *conn,const struct bt_gatt_attr *att
     if (offset) return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     if (ota_upload_locked()) return BT_GATT_ERR(BT_ATT_ERR_WRITE_NOT_PERMITTED);
     if (len==12 && !memcmp(buf,"MODE CONTROL",12)) {
-        atomic_set(&enabled,1); return len;
+        atomic_set(&enabled,1);
+        /* Request 7.5–15 ms, no peripheral latency. Central chooses final
+         * timing; a rejected update does not disable command transport. */
+        (void)bt_conn_le_param_update(conn,BT_LE_CONN_PARAM(6,12,0,600));
+        return len;
     }
     if (!control_enabled()) return BT_GATT_ERR(BT_ATT_ERR_WRITE_NOT_PERMITTED);
     int rc=console_remote(buf,len);
@@ -35,12 +39,16 @@ static void notify_connection(struct bt_conn *conn,void *data)
     if (!control_enabled() || !bt_gatt_is_subscribed(conn,&control_service.attrs[4],BT_GATT_CCC_NOTIFY)) return;
     const char *line=data;
     size_t len=strlen(line), limit=bt_gatt_get_mtu(conn)-3;
-    while (len) {
-        size_t n=MIN(len,limit);
-        if (bt_gatt_notify(conn,&control_service.attrs[4],line,n)) return;
-        line+=n; len-=n;
+    /* Include the terminator in the last notification rather than spending
+     * another connection event just to send one newline byte. */
+    uint8_t packet[244];
+    limit=MIN(limit,sizeof(packet));
+    while (len>=limit) {
+        if (bt_gatt_notify(conn,&control_service.attrs[4],line,limit)) return;
+        line+=limit; len-=limit;
     }
-    bt_gatt_notify(conn,&control_service.attrs[4],"\n",1);
+    memcpy(packet,line,len);packet[len]='\n';
+    bt_gatt_notify(conn,&control_service.attrs[4],packet,len+1);
 }
 void control_notify(const char *line)
 {

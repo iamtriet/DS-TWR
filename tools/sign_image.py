@@ -7,6 +7,7 @@ import re
 import struct
 import subprocess
 import sys
+from datetime import datetime, timezone, timedelta
 
 ROOT = Path(__file__).resolve().parents[1]
 SLOT = 0x32000
@@ -82,7 +83,7 @@ def main():
     if len(versions) != 1:
         p.error("Expected exactly one firmware version manifest in current HEX")
     version = versions.pop().decode()
-    expected = {"validation":"1.0.0","validation_b":"1.0.18","reference":"1.1.0","swarm":"1.2.7"}[a.env]
+    expected = {"validation":"1.0.0","validation_b":"1.0.18","reference":"1.1.0","swarm":"1.2.10"}[a.env]
     if version != expected:
         p.error(f"Stale or wrong build: expected {expected}, got {version}")
     out = a.output_dir
@@ -98,6 +99,14 @@ def main():
     ih.frombytes(signed.read_bytes(), offset=BASE)
     ih.write_hex_file(str(signed.with_suffix(".hex")))
     signed.with_suffix(".json").write_text(json.dumps(info, indent=2) + "\n")
+    # Timestamp denotes packaging/signing time in Vietnam, not compilation time.
+    packaged = datetime.now(timezone(timedelta(hours=7)))
+    named = out / f"{a.env}_v{version}_{packaged:%Y-%m-%d_%H-%M-%S}_UTC+07.signed.bin"
+    named.write_bytes(signed.read_bytes())
+    named.with_suffix(".hex").write_bytes(signed.with_suffix(".hex").read_bytes())
+    named.with_suffix(".json").write_text(json.dumps({**info,
+        "packaged_at": packaged.isoformat(), "timestamp_meaning": "signing/packaging time, not build time"}, indent=2)+"\n")
+    print(f"Timestamped firmware: {named}")
     print(json.dumps(info, indent=2))
 
 

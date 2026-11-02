@@ -28,6 +28,8 @@ class ManualLEDTests(unittest.IsolatedAsyncioTestCase):
   self.assertEqual(wire_command('led aux rgb 1 0 0 1 0 0'),'led aux rgb 0 1 0 0 1 0')
   self.assertEqual(wire_command('led aux rgb 0 1 0 0 1 0'),'led aux rgb 0 0 1 0 0 1')
   self.assertEqual(wire_command('led aux rgb 0 0 0 0 0 1'),'led aux rgb 0 0 0 1 0 0')
+  self.assertEqual(wire_command('led aux rgb 0 0 1 0 0 0'),'led aux rgb 1 0 0 0 0 0')
+  self.assertEqual(logical_status('RGB_R1=1 RGB_G1=0 RGB_B1=0'),'RGB_R1=0 RGB_G1=0 RGB_B1=1')
   self.assertEqual(wire_command('led aux uv 1 0'),'led aux uv 1 0')
   line=logical_status('RGB_R1=unsupported RGB_G1=1 RGB_B1=0 RGB_R2=0 RGB_G2=1 RGB_B2=0')
   self.assertEqual(line,'RGB_R1=1 RGB_G1=0 RGB_B1=unsupported RGB_R2=1 RGB_G2=0 RGB_B2=0')
@@ -52,6 +54,25 @@ class ManualLEDTests(unittest.IsolatedAsyncioTestCase):
   self.assertEqual(sorted(calls),[(1,'led aux off'),(2,'led aux off')])
   self.assertTrue(all('connection=warm' in r for r in rows))
   await fleet.close_led_sessions();self.assertEqual(sorted(closed),[1,2]);self.assertFalse(fleet.led_sessions)
+ async def test_four_boards_stay_warm_across_selection_changes(self):
+  from swarm_gateway import LEDFleet
+  fleet=LEDFleet([dict(name=str(i),address=str(i)) for i in range(1,5)],lambda *a:None)
+  opened=[];closed=[];active=0;peak=0
+  class Session:
+   async def command(self,cmd):
+    nonlocal active,peak
+    active+=1;peak=max(peak,active);await asyncio.sleep(.001);active-=1
+    return [f'FICR ID={self.n:016x}'] if cmd=='info' else ['AUX_LED v=1 profile=off']
+   async def close(self):closed.append(self.n)
+  async def opening(board):
+   s=Session();s.n=int(board['name']);opened.append(s.n);return s
+  fleet.open_session=opening
+  await fleet.manual_led([1,2,3,4],'led aux status')
+  await fleet.manual_led([1],'led aux off')
+  rows=await fleet.manual_led([1,2,3,4],'led aux rgb 0 0 0 0 0 0')
+  self.assertEqual(len(opened),4);self.assertEqual(peak,4);self.assertFalse(closed)
+  self.assertTrue(all('connection=warm' in r for r in rows))
+  await fleet.stop();self.assertEqual(sorted(closed),[1,2,3,4])
  async def test_multi_node_picking_ignores_trail_overlays(self):
   from uwb3d_view import Scene
   from types import SimpleNamespace
@@ -62,7 +83,7 @@ class ManualLEDTests(unittest.IsolatedAsyncioTestCase):
  async def test_reject_non_led_commands(self):
   fleet=SwarmFleet([{}]*6,lambda *a:None,origin=6)
   with self.assertRaises(ValueError):await fleet.manual_led([1],'uwb stop')
-  with self.assertRaises(ValueError):await fleet.manual_led([1],'led aux rgb 0 0 1 0 0 0')
+  with self.assertRaises(ValueError):await fleet.manual_led([1],'led aux rgb 0 0 2 0 0 0')
  async def test_led_operation_preserves_tracking(self):
   from control_app import ControlApp
   from types import SimpleNamespace

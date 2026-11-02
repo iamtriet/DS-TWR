@@ -105,6 +105,25 @@ class PostUWBTests(unittest.TestCase):
    out=gate.update(s,1,t)
    self.assertNotIn(1,out['stationary_held'])
    self.assertAlmostEqual(out['positions'][1][0],i*.01)
+ def test_quiet_imu_does_not_flatten_range_supported_circle(self):
+  gate=PositionGate()
+  for i in range(251):
+   t=10+i*.04;angle=2*math.pi*i/250
+   s=state(t,x=.2*math.cos(angle));s['positions'][1][1]=.2*math.sin(angle)
+   s['metrics'].update(cooperative=True,node_quality={1:{'relative_rest':False}})
+   out=gate.update(s,1,t)
+   self.assertEqual(out['positions'][1],s['positions'][1])
+   self.assertNotIn(1,out['stationary_held']);self.assertNotIn('1',out['position_rejections'])
+ def test_cooperative_rest_locks_but_range_motion_releases(self):
+  gate=PositionGate()
+  for i in range(20):
+   t=10+i*.04;s=state(t,x=0)
+   s['metrics'].update(cooperative=True,node_quality={1:{'relative_rest':True}})
+   out=gate.update(s,1,t)
+  self.assertIn(1,out['stationary_held'])
+  s=state(10.8,x=.01);s['metrics'].update(cooperative=True,node_quality={1:{'relative_rest':False}})
+  out=gate.update(s,1,10.8)
+  self.assertEqual(out['positions'][1][0],.01);self.assertNotIn(1,out['stationary_held'])
  def test_quiet_lock_does_not_survive_missing_node(self):
   gate=PositionGate()
   for i in range(10):gate.update(state(10+i*.1,x=0),1,10+i*.1)

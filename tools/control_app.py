@@ -410,7 +410,9 @@ class ControlApp:
 
         ota = ttk.LabelFrame(page, text="Signed firmware update", padding=10); ota.pack(fill="x", pady=12)
 
-        self.image_path = tk.StringVar(value=str(ROOT / "build/images/validation_b.signed.bin"))
+        images = sorted((ROOT / "build/images").rglob("swarm_v*_UTC+07.signed.bin"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)
+        self.image_path = tk.StringVar(value=str(images[0] if images else ROOT / "build/images/power-1.2.10/swarm.signed.bin"))
 
         ttk.Entry(ota, textvariable=self.image_path).pack(fill="x")
 
@@ -1142,7 +1144,7 @@ class ControlApp:
         self.closing = True
 
         async def cleanup():
-
+            await self.led_tracking.controls.close_connections()
             await asyncio.gather(*(s.close() for s in list(self.sessions.values())), return_exceptions=True)
             await self.uwb3d.runtime.shutdown()
 
@@ -1173,6 +1175,10 @@ if __name__ == "__main__":
     if "--scan" in sys.argv:
 
         root.after(300, app.scan)
+
+    if "--led" in sys.argv:
+        root.geometry('1280x960')
+        app.led_tracking.master.select(app.led_tracking)
 
     root.mainloop()
 

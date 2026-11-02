@@ -25,9 +25,9 @@ class SwarmFleet(GatewayFleet):
         from led_protocol import wire_command,logical_status,command_ack
         wire=wire_command(command);nodes=list(dict.fromkeys(nodes));results=[]
         async def send(node):
-            started=time.monotonic();warm=False
+            started=time.perf_counter();warm=False
             try:
-                if node not in self.identities:raise ValueError('Unknown node identity')
+                if node not in self.identities and not getattr(self,'led_only',False):raise ValueError('Unknown node identity')
                 cached=self.led_sessions.get(node)
                 if cached:
                     session,uid=cached
@@ -39,18 +39,20 @@ class SwarmFleet(GatewayFleet):
                     board=self.boards[0 if node==self.origin else node]
                     session=await self.open_session(board)
                     # Register immediately so failures/cancellation also close it.
-                    self.led_sessions[node]=(session,self.identities[node])
+                    self.led_sessions[node]=(session,self.identities.get(node))
                     info=await session.command('info')
                     uid=next((m[1] for line in info if (m:=re.search(r'FICR ID=([0-9a-fA-F]{16})',line))),None)
-                    if not uid or uid.lower()!=self.identities[node].lower():raise ValueError('Hardware UID mismatch')
+                    if not uid or (node in self.identities and uid.lower()!=self.identities[node].lower()):raise ValueError('Hardware UID mismatch')
+                    self.identities[node]=uid
+                    self.led_sessions[node]=(session,uid)
                     caps=await session.command('led aux status')
                     if not any(line.startswith('AUX_LED v=1 ') for line in caps):raise RuntimeError('Manual LED requires firmware 1.2.7')
-                reply=await session.command(wire)
+                reply=caps if not warm and command=='led aux status' else await session.command(wire)
                 if command=='led aux status':
                     line=next((logical_status(line) for line in reply if line.startswith('AUX_LED v=1 ')),None)
                     if not line:raise RuntimeError('Missing LED status')
                 else:line=command_ack(command)
-                elapsed=round((time.monotonic()-started)*1000)
+                elapsed=round((time.perf_counter()-started)*1000)
                 result=f'{node:04X}: {line} elapsed_ms={elapsed} connection={"warm" if warm else "new"}'
                 self.emit('gateway',result);return result
             except BaseException as exc:
@@ -58,11 +60,14 @@ class SwarmFleet(GatewayFleet):
                 if isinstance(exc,asyncio.CancelledError):raise
                 return f'{node:04X}: FAILED: {exc}'
         async with self.control_lock:
-            # Bound retained Windows BLE connections to two. Larger selections
-            # are sent in pairs; repeat commands to the same pair are warm.
-            for start in range(0,len(nodes),2):
-                batch=nodes[start:start+2]
-                await self.close_led_sessions(set(self.led_sessions)-set(batch))
+            # Retain the complete bench group, including unselected nodes so
+            # switching selection does not incur discovery/reconnection again.
+            # Bound larger fleets to six Windows adapter connections.
+            for start in range(0,len(nodes),6):
+                batch=nodes[start:start+6]
+                excess=max(0,len(set(self.led_sessions)|set(batch))-6)
+                evict=[n for n in self.led_sessions if n not in batch][:excess]
+                await self.close_led_sessions(evict)
                 results.extend(await asyncio.gather(*(send(n) for n in batch)))
         return results
 
@@ -141,3 +146,16 @@ class SwarmFleet(GatewayFleet):
                 await session.command('swarm start')
             finally:await session.close()
         self.emit('gateway','Active collector is the stationary position origin; heading remains relative' if self.origin else 'Anchor-free swarm active; sniffer has no UWB TX; body calibration absent')
+
+class LEDFleet(SwarmFleet):
+    """LED-only connections: never configure/start/stop a UWB radio."""
+    def __init__(self, boards, emit):
+        import asyncio
+        from control_backend import Session
+        if not boards or len({b['address'] for b in boards})!=len(boards):
+            raise ValueError('Select unique BLE boards')
+        self.boards=[None,*boards];self.emit=emit;self.origin=0
+        self.identities={};self.led_sessions={};self.control_lock=asyncio.Lock()
+        self.factory=Session;self.led_only=True
+    async def stop(self):
+        async with self.control_lock:await self.close_led_sessions()

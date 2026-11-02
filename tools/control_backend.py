@@ -5,6 +5,7 @@ import time
 
 CONTROL_WRITE = "8d53dc21-1db7-4cd3-868b-8a527460aa84"
 CONTROL_NOTIFY = "8d53dc22-1db7-4cd3-868b-8a527460aa84"
+_discovered_devices = {}
 
 
 def radio_id(value):
@@ -64,7 +65,9 @@ class Session:
         try:
             if self.address:
                 from bleak import BleakClient
-                self.client = BleakClient(self.address, timeout=20,
+                cached = _discovered_devices.get(str(self.address).upper())
+                target = cached[1] if cached and time.monotonic()-cached[0]<120 else self.address
+                self.client = BleakClient(target, timeout=20,
                     winrt={"use_cached_services": False},
                     disconnected_callback=lambda _: self.emit("disconnected", self.label))
                 await self.client.connect()
@@ -167,10 +170,11 @@ class Session:
             await self.client.disconnect()
 
 
-async def discover():
+async def discover(timeout=8):
     from bleak import BleakScanner
     from ota_update import SERVICE
-    found = await BleakScanner.discover(timeout=8, return_adv=True)
+    found = await BleakScanner.discover(timeout=timeout, return_adv=True)
+    _discovered_devices.update({dev.address.upper(): (time.monotonic(), dev) for dev, adv in found.values()})
     return [{"name": adv.local_name or dev.name, "address": dev.address, "rssi": adv.rssi}
             for dev, adv in found.values()
             if re.fullmatch(r"PCB_[0-9A-F]{8}", adv.local_name or dev.name or "") and SERVICE in adv.service_uuids]

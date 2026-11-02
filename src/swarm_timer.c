@@ -13,6 +13,16 @@ static void timer_isr(const void *unused)
     NRF_TIMER2->INTENCLR=TIMER_INTENCLR_COMPARE0_Msk;k_sem_give(&swarm_event);
 }
 void swarm_wake(void) { k_sem_give(&swarm_event); }
+void swarm_timer_stop(void)
+{
+    if(!timer_ready)return;
+    NRF_TIMER2->INTENCLR=TIMER_INTENCLR_COMPARE0_Msk;
+    NRF_TIMER2->TASKS_STOP=1;
+    NRF_TIMER2->EVENTS_COMPARE[0]=0;
+    irq_disable(TIMER2_IRQn);NVIC_ClearPendingIRQ(TIMER2_IRQn);
+    timer_ready=false;
+    k_sem_reset(&swarm_event);
+}
 void swarm_timer_init(void)
 {
     if(timer_ready)return;
@@ -34,6 +44,7 @@ void swarm_wait(void) { k_sem_take(&swarm_event,K_USEC(100)); }
 #else
 void swarm_wake(void) {}
 void swarm_timer_init(void) {}
+void swarm_timer_stop(void) {}
 void swarm_timer_arm(unsigned int us) { (void)us; }
 void swarm_wait(void) {}
 #endif

@@ -133,7 +133,7 @@ int console_init(void)
                     writer,NULL,NULL,NULL,10,0,K_NO_WAIT);
     return 0;
 }
-static int dispatch(char *line)
+static int dispatch(char *line,bool remote)
 {
     char *args[16]; int count=0;
     for (char *p=strtok(line," \t"); p; p=strtok(NULL," \t")) {
@@ -146,7 +146,7 @@ static int dispatch(char *line)
         out("help | info | diag | led on/off | reset");
         out("led mode blink/role (role: solid LED3 for anchor, blinking for tags; LED2 is charger-controlled)");
         out("imu init/status/read/stream/stop/reset");
-        out("led aux status/off | led aux uv LEFT RIGHT | led aux rgb R1 G1 B1 R2 G2 B2 (0/1; R1 unavailable)");
+        out("led aux status/off | led aux uv LEFT RIGHT | led aux rgb R1 G1 B1 R2 G2 B2 (0/1; legacy pin labels; RGB B1 on P0.02 via Control Center)");
         out("uwb init/status/tx/rx/range/continuous/stop | uwb role anchor/tag");
         out("uwb id HEX | uwb peer HEX | uwb calibration TX_DELAY RX_DELAY TX_POWER_HEX PG_DELAY_HEX");
         out("uwb anchors clear | uwb anchors HEX [HEX ...] (peer allowlist, max 12)");
@@ -184,7 +184,10 @@ static int dispatch(char *line)
     if (!strcmp(args[0],"multitag")) rc=multitag_command(count-1,args+1);
     if (!strcmp(args[0],"ota")) rc=ota_command(count-1,args+1);
     if (!strcmp(args[0],"dstwr")) rc=dstwr_command(count-1,args+1);
-    out("[%s] %s rc=%d",args[0],status_name(rc),rc);
+    /* BLE LED SET already gets @DONE below: avoid a redundant notification.
+     * UART still needs its original [led] acknowledgement. */
+    if (!(remote && !strcmp(args[0],"led") && count>=3 && !strcmp(args[1],"aux")))
+        out("[%s] %s rc=%d",args[0],status_name(rc),rc);
     return rc;
 }
 void cli_service(void)
@@ -193,7 +196,7 @@ void cli_service(void)
     if (!k_msgq_get(&remoteq,remote,K_NO_WAIT)) {
         if (control_enabled()) {
             /* Flash/reboot management belongs to the signed OTA transport. */
-            int rc=(!strncmp(remote,"ota ",4) || !strcmp(remote,"reset")) ? -EACCES : dispatch(remote);
+            int rc=(!strncmp(remote,"ota ",4) || !strcmp(remote,"reset")) ? -EACCES : dispatch(remote,true);
             out("@DONE %d",rc);
         }
         return;
@@ -204,7 +207,7 @@ void cli_service(void)
     /* One command per service call; radio/IMU get time between commands. */
     for (int i=0;i<256 && !k_msgq_get(&rxq,&c,K_NO_WAIT);++i) {
         if (c=='\r' || c=='\n') {
-            if (!discard && used) { line[used]=0; dispatch(line); }
+            if (!discard && used) { line[used]=0; dispatch(line,false); }
             used=0; discard=false; return;
         }
         if (discard) continue;

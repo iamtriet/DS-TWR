@@ -11,6 +11,31 @@ from uwb3d_core import Range
 
 
 class CooperativeTests(unittest.TestCase):
+    def test_motion_corrections_fit_display_speed_gate(self):
+        from collections import defaultdict,deque
+        from position_gate import PositionGate
+        tracker=CooperativeRangeTracker(origin=4);gate=PositionGate();ids=[1,2,3,4]
+        history=defaultdict(lambda:deque(maxlen=80))
+        rejected=0;start=None;end=None
+        for step in range(160):
+            now=step*.04;moving=now>=3
+            truth=np.array([[-.5,.6],[.3+.35*max(0,now-3),.5],[.6,.2],[0.,0.]])
+            d=np.linalg.norm(truth[:,None,:]-truth[None,:,:],axis=2)
+            edges=[Range(i,j,d[i-1,j-1],now,now,step,quality=1.) for i,j in combinations(ids,2)]
+            nodes={i:SimpleNamespace(imu=dict(sensor='BNO085',moving=i==2 and moving,quiet_ms=0 if i==2 and moving else 5100,score_mg=30,sample_age_ms=20,received=now)) for i in ids}
+            for r in edges:history[(r.a,r.b)].append((now,r.distance))
+            points,meta=tracker.solve(ids,d,edges,nodes,history,now)
+            source=dict(time=now,published_at=now,positions=dict(zip(ids,points.tolist())),state='measured-supported',
+                        metrics=meta,nodes=[dict(id=i,imu=nodes[i].imu) for i in ids])
+            shown=gate.update(source,1,now)
+            if moving:
+                self.assertFalse(shown['position_rejections'])
+                rejected+=sum('SPEED LIMIT' in r for r in shown['position_rejections'].values())
+                if start is None:start=np.array(shown['positions'][2])
+                end=np.array(shown['positions'][2])
+        self.assertEqual(rejected,0)
+        self.assertGreater(np.linalg.norm(end-start),.8)
+
     def test_measured_collector_origin_and_quiet_covariance_remain_bounded(self):
         from collections import defaultdict,deque
         tracker=CooperativeRangeTracker(origin=6);ids=list(range(1,7))
@@ -130,6 +155,61 @@ class CooperativeTests(unittest.TestCase):
         self.assertEqual(motion['score_mg'],20)
         p[36]=8
         with self.assertRaises(ValueError):Beacon.unpack(p,1.)
+
+    def test_fixed_origin_keeps_quiet_peers_when_one_moves_and_collector_imu_missing(self):
+        tracker=CooperativeRangeTracker(origin=4);ids=[1,2,3,4]
+        truth=np.array([[-.7,.2],[.2,.4],[.5,-.5],[0.,0.]])
+        d=np.linalg.norm(truth[:,None,:]-truth[None,:,:],axis=2)
+        nodes={i:SimpleNamespace(imu=dict(sensor='BNO085',moving=i==2,quiet_ms=0 if i==2 else 5100,score_mg=30 if i==2 else 0,sample_age_ms=20,received=0.)) for i in ids}
+        nodes[4].imu={};tracker.rest_members={1,2,3};baseline=None
+        for step in range(50):
+            now=step*.04
+            for i in (1,2,3):nodes[i].imu['received']=now
+            moved=truth.copy();moved[1]+=[.12*np.sin(now),.12*(1-np.cos(now))]
+            d=np.linalg.norm(moved[:,None,:]-moved[None,:,:],axis=2)
+            edges=[Range(i,j,d[i-1,j-1],now,now,step,quality=1.) for i,j in combinations(ids,2)]
+            points,meta=tracker.solve(ids,d,edges,nodes,{},now)
+            self.assertEqual(meta['stationary'],[1,3,4])
+            if step==26:baseline=points[[0,2,3]].copy()
+            if step>26:np.testing.assert_allclose(points[[0,2,3]],baseline,atol=1e-8)
+
+    def test_circular_motion_releases_false_imu_quiet(self):
+        from collections import defaultdict,deque
+        tracker=CooperativeRangeTracker(origin=4);ids=[1,2,3,4]
+        history=defaultdict(lambda:deque(maxlen=80));released=None;path=[]
+        for step in range(225):
+            now=step*.04;angle=max(0.,now-3.)
+            truth=np.array([[-.8,.2],[.3+.2*np.cos(angle),.5+.2*np.sin(angle)],[.8,-.3],[0.,0.]])
+            d=np.linalg.norm(truth[:,None,:]-truth[None,:,:],axis=2)
+            edges=[Range(i,j,d[i-1,j-1],now,now,step,quality=1.) for i,j in combinations(ids,2)]
+            for r in edges:history[(r.a,r.b)].append((now,r.distance))
+            # Smooth translation can leave accelerometer-only motion quiet.
+            nodes={i:SimpleNamespace(imu=dict(sensor='BNO085',moving=False,quiet_ms=5100,score_mg=0,sample_age_ms=20,received=now)) for i in ids}
+            points,meta=tracker.solve(ids,d,edges,nodes,history,now)
+            if step==74:self.assertIn(2,meta['stationary'])
+            if now>3 and 2 not in meta['stationary'] and released is None:released=now
+            if now>4:path.append(points[1,:2])
+        self.assertIsNotNone(released);self.assertLess(released-3.,.8)
+        # Curvature survives estimation: path must span two dimensions.
+        singular=np.linalg.svd(np.array(path)-np.mean(path,axis=0),compute_uv=False)
+        self.assertGreater(singular[-1]/singular[0],.25)
+
+    def test_static_peer_vibration_during_other_nodes_arc(self):
+        from collections import defaultdict,deque
+        tracker=CooperativeRangeTracker(origin=4);ids=[1,2,3,4]
+        history=defaultdict(lambda:deque(maxlen=80))
+        for step in range(130):
+            now=step*.04;angle=max(0.,now-3.)
+            truth=np.array([[-.5,.6],[.3+.2*np.cos(angle),.5+.2*np.sin(angle)],[.6,.2],[0.,0.]])
+            d=np.linalg.norm(truth[:,None,:]-truth[None,:,:],axis=2)
+            edges=[Range(i,j,d[i-1,j-1],now,now,step,quality=1.) for i,j in combinations(ids,2)]
+            for r in edges:history[(r.a,r.b)].append((now,r.distance))
+            vibration=3.4<=now<3.7
+            nodes={i:SimpleNamespace(imu=dict(sensor='BNO085',moving=(i==2 and now>3) or (i==1 and vibration),quiet_ms=0 if (i==2 and now>3) or (i==1 and vibration) else 5100,score_mg=30,sample_age_ms=20,received=now)) for i in ids}
+            _,meta=tracker.solve(ids,d,edges,nodes,history,now)
+            if vibration:
+                self.assertIn(1,meta['stationary']);self.assertIn(3,meta['stationary'])
+                self.assertNotIn(2,meta['stationary'])
 
 
 if __name__=='__main__':unittest.main()

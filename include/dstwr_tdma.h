@@ -191,8 +191,8 @@ typedef struct {
 } dstwr_sniffer_report_t;
 #pragma pack(pop)
 
-_Static_assert(sizeof(dstwr_sniffer_report_t) == 24,
-               "dstwr_sniffer_report_t must be exactly 24 bytes");
+_Static_assert(sizeof(dstwr_sniffer_report_t) == 20,
+               "dstwr_sniffer_report_t header must be exactly 20 bytes (CRC follows payload)");
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * PER-NODE RUNTIME STATE

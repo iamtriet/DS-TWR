@@ -91,6 +91,10 @@ class Simulator:
 
 class Runtime:
     def __init__(self,loop,config=None):
+        from threadpoolctl import threadpool_limits
+        # These matrices are tiny. Eight BLAS workers cost more scheduling
+        # time than the solve and compete with Tk/serial; one is sufficient.
+        self.blas_limit=threadpool_limits(limits=1,user_api='blas')
         self.loop=loop;self.config=(config or Config()).validate();self.engine=Engine(self.config)
         self.decoder=Decoder();self.ledger=BroadcastLedger();self.pending=deque();self.pending_lock=threading.Lock()
         self.state_lock=threading.Lock();self.latest={};self.tasks=[];self.executor=ThreadPoolExecutor(1,thread_name_prefix='uwb3d-solver')
@@ -111,6 +115,7 @@ class Runtime:
             self.pending.append((bytes(chunk),received))
     async def start(self,source='simulation',**options):
         await self.stop()
+        self.swarm_configured=False
         self.engine=Engine(self.config);self.decoder=Decoder();self.ledger=BroadcastLedger();self.offsets.clear();self.pending.clear()
         from swarm_core import SwarmEngine
         from swarm_localization import AsymmetricDSTWRAssembler
@@ -202,6 +207,7 @@ class Runtime:
             try:
                 await asyncio.wait_for(self.uart_ready.wait(),10)
                 await self.gateway.configure();self.error=('Reference TDMA DS-TWR active — STS/AES, RF/security unqualified' if reference else 'Experimental gateway active — radio throughput unqualified')
+                self.swarm_configured=swarm
                 if swarm:
                     if self.config.swarm_calibration:
                         profile=json.loads(Path(self.config.swarm_calibration).read_text(encoding='utf-8-sig'))
@@ -228,6 +234,25 @@ class Runtime:
             self.error=str(exc)
             errors=await self.gateway.stop()
             if errors:self.error+='; stop unresolved: '+'; '.join(errors)
+    async def reconfigure_swarm(self,plan,port):
+        from control_backend import Session
+        # Validate newcomers before interrupting a healthy ranging group.
+        for board in plan['additions']:
+            session=Session(board['name'],lambda *args:None,address=board['address'])
+            try:
+                await session.open()
+                caps=await session.command('uwb capabilities')
+                if not any('SWARM broadcast_DS_TWR=1' in line for line in caps):
+                    raise RuntimeError(f"{board['name']}: install swarm firmware using Boards & OTA")
+            finally:await session.close()
+        omitted={b['address'] for b in plan['removed']}
+        # A powered-off member cannot acknowledge stop. Keep failures on every
+        # retained member strict; never silently ignore a live radio stop error.
+        self.gateway.started=[b for b in self.gateway.started if b['address'] not in omitted]
+        await self.stop()
+        self.config.swarm_origin=len(plan['boards'])
+        await self.start('swarm',boards=plan['boards'],port=port)
+
     async def _recover_swarm_nodes(self):
         attempted={};failures={};await asyncio.sleep(5)
         while True:
@@ -429,10 +454,15 @@ class Runtime:
         if self.log:self.log.put(dict(type='state',elapsed=now-self.started,state=state))
         return state
     async def _estimate(self):
+        previous_publish=None
         while True:
             start=time.monotonic()
             try:
                 state=await self.loop.run_in_executor(self.executor,self._step)
+                published=time.monotonic()
+                state['metrics']=dict(state.get('metrics',{}),estimator_ms=round((published-start)*1000,2),
+                                      publication_interval_ms=None if previous_publish is None else round((published-previous_publish)*1000,2))
+                previous_publish=published
                 with self.state_lock:self.latest=state
             except asyncio.CancelledError:raise
             except Exception as exc:

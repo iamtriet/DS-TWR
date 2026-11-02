@@ -4,6 +4,7 @@
 #include <stdint.h>
 void swarm_wake(void);
 void swarm_timer_init(void);
+void swarm_timer_stop(void);
 void swarm_timer_arm(uint32_t us);
 void swarm_wait(void);
 bool swarm_running(void);
